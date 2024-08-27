@@ -8,11 +8,13 @@ use esp_hal::{peripherals::LPWR, reset::SleepSource};
 mod battery;
 mod dns;
 mod throttle;
+mod ui;
 mod wifi;
 
 pub use wifi::wifi;
 
 pub use battery::{BatteryStatus, BatteryStatusDriver};
+pub use ui::drive_display;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]

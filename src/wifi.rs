@@ -5,8 +5,10 @@
 
 use core::str::FromStr;
 use embassy_executor::Spawner;
-use embassy_net::tcp::client::{TcpClient, TcpClientState};
 use embassy_net::{Config, Stack, StackResources};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::peripherals::RADIO_CLK;
@@ -24,13 +26,47 @@ use esp_wifi::{
     },
     EspWifiInitFor,
 };
-use reqwless::client::HttpClient;
-use reqwless::headers::ContentType;
-use reqwless::request::{Method, RequestBuilder};
 use static_cell::make_static;
 
-static SSID: &str = "Lavenderhaugen";
+pub enum MessageType {
+    TimeUpdate(&'static Signal<CriticalSectionRawMutex, TimeResponse>),
+    WeatherUpdate(&'static Signal<CriticalSectionRawMutex, WeatherResponse>),
+}
+
+pub struct TimeResponse {}
+pub struct WeatherResponse {}
+
+/// A bus for coordinating commands that can be actioned by the network task
+static NETWORK_BUS: Channel<CriticalSectionRawMutex, MessageType, 10> = Channel::new();
+
+static SSID: &str = "NOW1QQ9L";
 const PASSWORD: &str = include_str!("../wifi-password.txt");
+
+// new requests should just reuse existing values
+static TIME_SIGNAL: Signal<CriticalSectionRawMutex, TimeResponse> = Signal::new();
+static WEATHER_SIGNAL: Signal<CriticalSectionRawMutex, WeatherResponse> = Signal::new();
+
+pub async fn get_time() -> TimeResponse {
+    // todo: avoid making already fulfilled requests
+    let (time, _) = embassy_futures::join::join(
+        TIME_SIGNAL.wait(),
+        NETWORK_BUS.send(MessageType::TimeUpdate(&TIME_SIGNAL)),
+    )
+    .await;
+
+    time
+}
+
+pub async fn get_weather() -> WeatherResponse {
+    // todo: avoid making already fulfilled requests
+    let (weather, _) = embassy_futures::join::join(
+        WEATHER_SIGNAL.wait(),
+        NETWORK_BUS.send(MessageType::WeatherUpdate(&WEATHER_SIGNAL)),
+    )
+    .await;
+
+    weather
+}
 
 #[embassy_executor::task]
 pub async fn wifi(
@@ -68,7 +104,7 @@ pub async fn wifi(
     spawner.spawn(connection(controller)).ok();
     spawner.spawn(net_task(stack)).ok();
 
-    let mut rx_buffer = [0; 4096];
+    let rx_buffer = [0; 4096];
 
     loop {
         if stack.is_link_up() {
@@ -86,19 +122,9 @@ pub async fn wifi(
         Timer::after(Duration::from_millis(500)).await;
     }
 
-    let state: TcpClientState<1, 1024, 1024> = TcpClientState::new();
-    let client = TcpClient::new(stack, &state);
-    let mut client = HttpClient::new(&client, &crate::dns::StaticDns);
-
-    client
-        .request(Method::POST, "http://10.13.1.179:8080")
-        .await
-        .unwrap()
-        .body(())
-        .content_type(ContentType::ApplicationOctetStream)
-        .send(&mut rx_buffer)
-        .await
-        .unwrap();
+    // let state: TcpClientState<1, 1024, 1024> = TcpClientState::new();
+    // let client = TcpClient::new(stack, &state);
+    // let mut client = HttpClient::new(&client, &crate::dns::StaticDns);
 }
 
 #[embassy_executor::task]
@@ -115,6 +141,7 @@ async fn connection(mut controller: WifiController<'static>) {
             let client_config = Configuration::Client(ClientConfiguration {
                 ssid: heapless::String::from_str(SSID).unwrap(),
                 password: heapless::String::from_str(PASSWORD).unwrap(),
+
                 ..Default::default()
             });
             controller.set_configuration(&client_config).unwrap();

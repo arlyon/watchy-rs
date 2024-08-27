@@ -61,15 +61,9 @@ futures = { version = "0.3.30", default-features = false, features = [
 ] }
 pin-project-lite = "0.2.14"
 embedded-nal-async = "0.7.1"
-esp-wifi = { version = "0.7.1", default-features = false, features = [
-    "esp32s3",
-    "wifi",
-    "embassy-net",
-    "defmt",
-    "utils",
-    "smoltcp",
-    "ipv4",
-] }
+esp-wifi = { version = "0.7.1", default-features = false, features = ["esp32s3", "wifi", "embassy-net", "defmt", "utils", "smoltcp", "ipv4",
+# "wifi-logs",
+"phy-enable-usb"] }
 reqwless = { version = "0.12.1", default-features = false, features = [
     "defmt",
 ] }
@@ -86,6 +80,7 @@ embassy-net = { version = "0.4.0", features = [
 ] }
 pin-utils = "0.1.0"
 esp-wifi-sys = "0.4.0"
+# slint = { version = "1.7.2", default-features = false, features = ["compat-1-2", "unsafe-single-threaded", "libm", "renderer-software"] }
 
 [patch.crates-io]
 embassy-net = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }

@@ -7,67 +7,34 @@
 use esp_backtrace as _;
 use esp_println as _;
 
+use esp_hal::prelude::*;
+
 use async_debounce::Debouncer;
 use bma423::{Bma423, FeatureInterruptStatus, InterruptDirection, PowerControlFlag, Uninitialized};
-use embassy_embedded_hal::shared_bus::blocking::spi::SpiDevice;
-
-use embassy_futures::select::{Either, Either4};
-use embedded_graphics::mono_font::MonoTextStyleBuilder;
-use embedded_graphics::text::Text;
-use embedded_hal_async::digital::Wait;
-
-use esp_hal::i2c::I2C;
-use esp_hal::interrupt::Priority;
-use esp_hal_embassy::InterruptExecutor;
-
-use embedded_graphics::prelude::*;
-use epd_waveshare::prelude::*;
-use esp_hal::{prelude::*, Blocking};
-
-use core::cell::RefCell;
 use core::future;
-use embassy_sync::blocking_mutex::Mutex;
-use embedded_graphics::primitives::{Circle, PrimitiveStyle};
-use epd_waveshare::epd1in54_v2::{Display1in54, Epd1in54};
-
 use embassy_executor::Spawner;
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
-use embassy_sync::pubsub::PubSubChannel;
-use embassy_time::{Duration, Instant, Timer};
+use embassy_futures::select::{Either, Either4};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_time::{Duration, Timer};
+use embedded_hal_async::digital::Wait;
 use esp_hal::clock::{ClockControl, Clocks};
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{
-    Gpio0, Gpio10, Gpio11, Gpio12, Gpio13, Gpio14, Gpio17, Gpio5, Gpio6, Gpio7, Gpio8, Input, Io,
-    Level, Output, Pull,
+    Gpio0, Gpio10, Gpio13, Gpio14, Gpio17, Gpio6, Gpio7, Gpio8, Input, Io, Level, Output, Pull,
 };
+use esp_hal::i2c::I2C;
+use esp_hal::interrupt::Priority;
 use esp_hal::peripherals::{Peripherals, ADC1, I2C0};
-use esp_hal::spi::master::Spi;
 use esp_hal::system::SystemControl;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::timer::{ErasedTimer, OneShotTimer, PeriodicTimer};
+use esp_hal::Blocking;
+use esp_hal_embassy::InterruptExecutor;
 use static_cell::StaticCell;
 
-// mod display;
-//
-
-pub const MSGS: usize = 50;
-pub const SUBS: usize = 2;
-pub const PUBS: usize = 1;
-
 static CLOCK: StaticCell<Clocks> = StaticCell::new();
-static BUS: StaticCell<PubSubChannel<NoopRawMutex, (Instant, ()), MSGS, SUBS, PUBS>> =
-    StaticCell::new();
 static I2C_G: StaticCell<I2C0> = StaticCell::new();
 static TIMERS: StaticCell<[OneShotTimer<ErasedTimer>; 1]> = StaticCell::new();
-
-static BUTTON_1: Mutex<CriticalSectionRawMutex, RefCell<Option<Input<'static, Gpio12>>>> =
-    Mutex::new(RefCell::new(None));
-static BUTTON_2: Mutex<CriticalSectionRawMutex, RefCell<Option<Input<'static, Gpio11>>>> =
-    Mutex::new(RefCell::new(None));
-static BUTTON_3: Mutex<CriticalSectionRawMutex, RefCell<Option<Input<'static, Gpio5>>>> =
-    Mutex::new(RefCell::new(None));
-static BUTTON_4: Mutex<CriticalSectionRawMutex, RefCell<Option<Input<'static, Gpio13>>>> =
-    Mutex::new(RefCell::new(None));
 
 static VIBRATION: StaticCell<Output<Gpio17>> = StaticCell::new();
 
@@ -78,156 +45,92 @@ static VIBRATION: StaticCell<Output<Gpio17>> = StaticCell::new();
 #[main]
 async fn main(low_prio_spawner: Spawner) {
     let peripherals = Peripherals::take();
-    let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = ClockControl::max(system.clock_control).freeze();
-    let clocks = CLOCK.init(clocks);
-    let mut delay = Delay::new(&clocks);
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
-
     let cause = watchy_rs::get_wakeup_cause(&peripherals.LPWR);
     defmt::info!("starting due to {:?}", cause);
 
-    let bus = BUS.init(PubSubChannel::new());
-    let timg0 = TimerGroup::new(peripherals.TIMG0, clocks, None);
-    let timer0: ErasedTimer = timg0.timer0.into();
+    let system = SystemControl::new(peripherals.SYSTEM);
+    let clocks = CLOCK.init(ClockControl::max(system.clock_control).freeze());
+    let delay = Delay::new(clocks);
+    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
-    let timer1 = {
-        let timg1 = TimerGroup::new(peripherals.TIMG1, &clocks, None);
-        let timer0: ErasedTimer = timg1.timer0.into();
-        PeriodicTimer::new(timer0)
+    let embassy_timers = {
+        let timg0 = TimerGroup::new(peripherals.TIMG0, clocks, None);
+        let timer0: ErasedTimer = timg0.timer0.into();
+        let timers = [OneShotTimer::new(timer0)];
+        TIMERS.init(timers)
     };
 
-    // let timer = PeriodicTimer::new(timer0);
+    esp_hal_embassy::init(clocks, embassy_timers);
 
-    let timers = [OneShotTimer::new(timer0)];
-    let timers = TIMERS.init(timers);
-    esp_hal_embassy::init(clocks, timers);
-
-    let i2c = I2C_G.init(peripherals.I2C0);
-
-    let i2c0 = I2C::new(
-        i2c,
-        io.pins.gpio12,
-        io.pins.gpio11,
-        400.kHz(),
-        &clocks,
-        None,
-    );
-
-    let vibration_motor = Output::new(io.pins.gpio17, Level::Low);
-    let vibration_motor = VIBRATION.init(vibration_motor);
-
-    defmt::info!("CREATE BMA");
-
-    let accel = Bma423::new(
-        i2c0,
-        bma423::Config {
-            bandwidth: bma423::AccelConfigBandwidth::CicAvg8,
-            range: bma423::AccelRange::Range2g,
-            performance_mode: bma423::AccelConfigPerfMode::CicAvg,
-            sample_rate: bma423::AccelConfigOdr::Odr100,
-        },
-    );
-
-    // accel.
+    {
+        defmt::info!("starting button / vibro handler");
+        static EXECUTOR: StaticCell<InterruptExecutor<2>> = StaticCell::new();
+        let executor =
+            InterruptExecutor::new(system.software_interrupt_control.software_interrupt2);
+        let executor = EXECUTOR.init(executor);
+        let spawner = executor.start(Priority::Priority3);
+        let vibration_motor = Output::new(io.pins.gpio17, Level::Low);
+        let vibration_motor = VIBRATION.init(vibration_motor);
+        spawner.must_spawn(handle_buttons(
+            io.pins.gpio7,
+            io.pins.gpio6,
+            io.pins.gpio0,
+            io.pins.gpio8,
+            io.pins.gpio14,
+            io.pins.gpio13,
+            io.pins.gpio10,
+            peripherals.ADC1,
+            vibration_motor,
+        ));
+    }
 
     defmt::info!("SPAWN TASKS");
 
-    low_prio_spawner.must_spawn(handle_accel(accel, delay));
-    // low_prio_spawner.must_spawn(watchy_rs::wifi(
-    //     timer1,
-    //     peripherals.RNG,
-    //     peripherals.RADIO_CLK,
-    //     clocks,
-    //     peripherals.WIFI,
-    //     low_prio_spawner,
-    // ));
+    {
+        let wifi_timer = {
+            let timg1 = TimerGroup::new(peripherals.TIMG1, clocks, None);
+            let timer0: ErasedTimer = timg1.timer0.into();
+            PeriodicTimer::new(timer0)
+        };
 
-    static EXECUTOR: StaticCell<InterruptExecutor<2>> = StaticCell::new();
-    let executor = InterruptExecutor::new(system.software_interrupt_control.software_interrupt2);
-    let executor = EXECUTOR.init(executor);
+        low_prio_spawner.must_spawn(watchy_rs::wifi(
+            wifi_timer,
+            peripherals.RNG,
+            peripherals.RADIO_CLK,
+            clocks,
+            peripherals.WIFI,
+            low_prio_spawner,
+        ));
+    }
 
-    let spawner = executor.start(Priority::Priority3);
-    spawner.must_spawn(handle_buttons(
-        io.pins.gpio7,
-        io.pins.gpio6,
-        io.pins.gpio0,
-        io.pins.gpio8,
-        io.pins.gpio14,
-        io.pins.gpio13,
-        io.pins.gpio10,
-        peripherals.ADC1,
-        vibration_motor,
+    low_prio_spawner.must_spawn(watchy_rs::drive_display(
+        peripherals.SPI2,
+        io.pins.gpio47,
+        io.pins.gpio46,
+        io.pins.gpio48,
+        io.pins.gpio33,
+        io.pins.gpio34,
+        io.pins.gpio35,
+        io.pins.gpio36,
+        clocks,
+        delay,
     ));
 
-    defmt::info!("Spawning low-priority tasks");
-
-    let spi2 = peripherals.SPI2;
-    let pin_spi_sck = io.pins.gpio47;
-    let pin_spi_miso = io.pins.gpio46;
-    let pin_spi_mosi = io.pins.gpio48;
-    let pin_spi_edp_cs = Output::new(io.pins.gpio33, Level::Low);
-    let pin_edp_dc = Output::new(io.pins.gpio34, Level::Low);
-    let pin_edp_reset = Output::new(io.pins.gpio35, Level::Low);
-    let pin_edp_busy = Input::new(io.pins.gpio36, Pull::Up);
-
-    let spi = Spi::new(spi2, 2.MHz(), esp_hal::spi::SpiMode::Mode0, clocks)
-        .with_sck(pin_spi_sck)
-        .with_miso(pin_spi_miso)
-        .with_mosi(pin_spi_mosi);
-
-    let spi = Mutex::<NoopRawMutex, _>::new(RefCell::new(spi));
-
-    let mut spi = SpiDevice::new(&spi, pin_spi_edp_cs);
-    let mut epd = Epd1in54::new(
-        &mut spi,
-        pin_edp_busy,
-        pin_edp_dc,
-        pin_edp_reset,
-        &mut delay,
-        None,
-    )
-    .unwrap();
-
-    epd.wake_up(&mut spi, &mut delay).unwrap();
-
-    defmt::info!("drawing");
-
-    // clear the display
-    epd.clear_frame(&mut spi, &mut delay).unwrap();
-    epd.display_frame(&mut spi, &mut delay).unwrap();
-
-    let style = MonoTextStyleBuilder::new()
-        .font(&embedded_graphics::mono_font::ascii::FONT_7X14_BOLD)
-        .text_color(Color::White)
-        .background_color(Color::Black)
-        .build();
-
-    // Use display graphics from embedded-graphics
-    let display = {
-        let mut display = Display1in54::default();
-        display.clear(Color::White).unwrap();
-
-        let _ = Circle::with_center(Point::new(100, 100), 50)
-            .into_styled(PrimitiveStyle::with_fill(Color::Black))
-            .draw(&mut display);
-
-        let _ = Text::new("FUCK", Point::new(87, 105), style).draw(&mut display);
-
-        display
-    };
-
-    // Display updated frame
-    epd.update_frame(&mut spi, &display.buffer(), &mut delay)
-        .unwrap();
-    epd.display_frame(&mut spi, &mut delay).unwrap();
-
-    defmt::info!("sleeping display");
-
-    // Set the EPD to sleep
-    epd.sleep(&mut spi, &mut delay).unwrap();
-
-    defmt::info!("done");
+    {
+        defmt::info!("CREATE BMA");
+        let i2c = I2C_G.init(peripherals.I2C0);
+        let i2c0 = I2C::new(i2c, io.pins.gpio12, io.pins.gpio11, 400.kHz(), clocks, None);
+        let accel = Bma423::new(
+            i2c0,
+            bma423::Config {
+                bandwidth: bma423::AccelConfigBandwidth::CicAvg8,
+                range: bma423::AccelRange::Range2g,
+                performance_mode: bma423::AccelConfigPerfMode::CicAvg,
+                sample_rate: bma423::AccelConfigOdr::Odr100,
+            },
+        );
+        low_prio_spawner.must_spawn(handle_accel(accel, delay));
+    }
 }
 
 #[embassy_executor::task]
@@ -279,7 +182,7 @@ async fn handle_buttons(
     p3: Gpio0,
     p4: Gpio8,
     acc_int_1: Gpio14,
-    acc_int_2: Gpio13,
+    _acc_int_2: Gpio13,
     stat: Gpio10,
     adc: ADC1,
     vibration: &'static mut Output<'static, Gpio17>,
@@ -360,7 +263,7 @@ async fn handle_buttons(
                         }
                     }
                 }
-                Either::Second(b) => {
+                Either::Second(_) => {
                     vibration_signal.signal(60);
                     is_charging = true
                 }
