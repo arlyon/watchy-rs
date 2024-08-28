@@ -19,7 +19,6 @@ harness = false
 
 [profile.release]
 opt-level = "s"
-lto = "thin"
 debug = true    # does not get flashed
 codegen-units = 1
 panic = "abort"
@@ -61,19 +60,44 @@ futures = { version = "0.3.30", default-features = false, features = [
 ] }
 pin-project-lite = "0.2.14"
 embedded-nal-async = "0.7.1"
-esp-wifi = { version = "0.7.1", default-features = false, features = ["esp32s3", "wifi", "embassy-net", "defmt", "utils", "smoltcp", "ipv4", "phy-enable-usb"] }
+esp-wifi = { version = "0.7.1", default-features = false, features = [
+    "esp32s3",
+    "wifi",
+    "embassy-net",
+    "defmt",
+    "utils",
+    "smoltcp",
+    "ipv4",
+    "phy-enable-usb",
+] }
 reqwless = { version = "0.12.1", default-features = false, features = [
     "defmt",
 ] }
-heapless = { version = "0.8.0", features = ["defmt-03"] }
+heapless = { version = "0.8.0", features = ["defmt-03", "ufmt"] }
 embedded-svc = { version = "0.28.0", default-features = false, features = [
     "nightly",
 ] }
-embassy-net = { version = "0.4.0", features = ["tcp", "dhcpv4", "medium-ethernet", "dns", "defmt", "udp"] }
+embassy-net = { version = "0.4.0", features = [
+    "tcp",
+    "dhcpv4",
+    "medium-ethernet",
+    "dns",
+    "defmt",
+    "udp",
+] }
 pin-utils = "0.1.0"
 esp-wifi-sys = "0.4.0"
 sntpc = { version = "0.3.9", default-features = false, features = ["async"] }
-smoltcp = { version = "0.11.0", default-features = false, features = ["async", "defmt", "socket", "socket-udp"] }
+smoltcp = { version = "0.11.0", default-features = false, features = [
+    "async",
+    "defmt",
+    "socket",
+    "socket-udp",
+] }
+itoa = "1.0.11"
+time = { version = "0.3.36", default-features = false }
+embedded-fonts = { version = "0.1.0" }
+ufmt = "0.2.0"
 # slint = { version = "1.7.2", default-features = false, features = ["compat-1-2", "unsafe-single-threaded", "libm", "renderer-software"] }
 
 [patch.crates-io]
@@ -83,3 +107,15 @@ embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282
 embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
 embassy-time-queue-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
 esp-wifi-sys = { path = "../esp-wifi-sys/esp-wifi-sys" }
+embedded-fonts = { path = "../embedded-fonts" }                                                                                     # git = "https://github.com/flyingyizi/embedded-fonts.git"
+
+[dev-dependencies]
+embedded-test = { version = "0.4.0", features = [
+    "embassy",
+    "defmt",
+    "external-executor",
+] }
+
+[[test]]
+name = "example_test"
+harness = false

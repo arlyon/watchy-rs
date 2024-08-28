@@ -1,4 +1,5 @@
 #![no_std]
+#![no_main]
 #![feature(error_in_core)]
 #![feature(type_alias_impl_trait)]
 
@@ -7,15 +8,17 @@ use esp_hal::{peripherals::LPWR, reset::SleepSource};
 
 mod battery;
 mod dns;
+mod fonts;
+pub mod sticky_signal;
 mod throttle;
 mod time;
 mod ui;
 mod wifi;
 
-pub use wifi::{get_time, get_weather, wifi};
-
 pub use battery::{BatteryStatus, BatteryStatusDriver};
+pub use time::GlobalTime;
 pub use ui::drive_display;
+pub use wifi::{get_time, get_weather, wifi};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]

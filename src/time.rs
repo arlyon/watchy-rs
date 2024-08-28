@@ -1,9 +1,72 @@
+use embassy_futures::select;
 use embassy_net::{udp::UdpSocket, IpAddress};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embedded_nal_async::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 
+use crate::sticky_signal::StickySignal;
 use esp_wifi::wifi::ipv4::ToSocketAddrs;
 
+use futures::Stream;
 use sntpc::{NtpContext, NtpResult, NtpTimestampGenerator};
+use static_cell::StaticCell;
+
+static OFFSET: StaticCell<StickySignal<NoopRawMutex, u64>> = StaticCell::new();
+
+/// A time struct. This is initialized to empty and is updated when
+/// the time changes.
+#[derive(Clone, Copy)]
+pub struct GlobalTime {
+    /// The estimated offset between system time and real time.
+    ///
+    /// This number is usually determined using an ntp server and
+    /// updated later.
+    offset_micros: &'static StickySignal<NoopRawMutex, u64>,
+}
+
+impl GlobalTime {
+    pub fn new() -> Self {
+        let offset_micros = OFFSET.init(Default::default());
+        Self { offset_micros }
+    }
+
+    pub fn init_offset(&self, offset_micros: u64) {
+        self.offset_micros.signal(offset_micros);
+    }
+
+    /// Get the time based on the system time + offset
+    pub fn get_time(&self) -> u64 {
+        let microseconds = esp_hal::time::current_time()
+            .duration_since_epoch()
+            .to_micros();
+
+        let offset = self.offset_micros.peek().unwrap_or_default();
+
+        defmt::info!(
+            "time is {} + {} = {}",
+            microseconds,
+            offset,
+            microseconds + offset
+        );
+        microseconds + offset
+    }
+
+    /// Produces a stream that terminates either when the offset is updated,
+    /// or never.
+    ///
+    /// TODO: make sure the first one starts on the minute
+    pub fn minutes<'a>(&'a self) -> impl Stream<Item = u64> + 'a {
+        let ticker = embassy_time::Ticker::every(embassy_time::Duration::from_secs(60));
+        futures::stream::unfold(ticker, move |mut ticker| async move {
+            match select::select(ticker.next(), self.offset_micros.wait()).await {
+                select::Either::First(()) => Some((self.get_time(), ticker)),
+                select::Either::Second(offset) => {
+                    defmt::info!("offset changed, exiting");
+                    None
+                }
+            }
+        })
+    }
+}
 
 #[derive(Copy, Clone, Default)]
 struct StdTimestampGen {

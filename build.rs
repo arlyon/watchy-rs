@@ -5,4 +5,6 @@ fn main() {
     //         .embed_resources(slint_build::EmbedResourcesKind::EmbedForSoftwareRenderer),
     // )
     // .unwrap();
+
+    println!("cargo::rustc-link-arg-tests=-Tembedded-test.x");
 }

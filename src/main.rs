@@ -31,6 +31,7 @@ use esp_hal::timer::{ErasedTimer, OneShotTimer, PeriodicTimer};
 use esp_hal::Blocking;
 use esp_hal_embassy::InterruptExecutor;
 use static_cell::StaticCell;
+use watchy_rs::GlobalTime;
 
 static CLOCK: StaticCell<Clocks> = StaticCell::new();
 static I2C_G: StaticCell<I2C0> = StaticCell::new();
@@ -84,8 +85,6 @@ async fn main(low_prio_spawner: Spawner) {
         ));
     }
 
-    defmt::info!("SPAWN TASKS");
-
     {
         let wifi_timer = {
             let timg1 = TimerGroup::new(peripherals.TIMG1, clocks, None);
@@ -103,6 +102,8 @@ async fn main(low_prio_spawner: Spawner) {
         ));
     }
 
+    let global_time = GlobalTime::new();
+
     low_prio_spawner.must_spawn(watchy_rs::drive_display(
         peripherals.SPI2,
         io.pins.gpio47,
@@ -113,11 +114,11 @@ async fn main(low_prio_spawner: Spawner) {
         io.pins.gpio35,
         io.pins.gpio36,
         clocks,
+        global_time,
         delay,
     ));
 
     {
-        defmt::info!("CREATE BMA");
         let i2c = I2C_G.init(peripherals.I2C0);
         let i2c0 = I2C::new(i2c, io.pins.gpio12, io.pins.gpio11, 400.kHz(), clocks, None);
         let accel = Bma423::new(
@@ -134,7 +135,11 @@ async fn main(low_prio_spawner: Spawner) {
 
     let time = watchy_rs::get_time().await;
     if let Some(time) = time {
-        defmt::info!("seconds: {}", time.seconds);
+        if time.offset < 0 {
+            panic!("invalid response");
+        }
+        global_time.init_offset(time.offset as u64);
+        defmt::info!("seconds: {}", time.offset);
     } else {
         defmt::info!("couldn't get time");
     }
