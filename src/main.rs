@@ -131,6 +131,13 @@ async fn main(low_prio_spawner: Spawner) {
         );
         low_prio_spawner.must_spawn(handle_accel(accel, delay));
     }
+
+    let time = watchy_rs::get_time().await;
+    if let Some(time) = time {
+        defmt::info!("seconds: {}", time.seconds);
+    } else {
+        defmt::info!("couldn't get time");
+    }
 }
 
 #[embassy_executor::task]

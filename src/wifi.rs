@@ -5,6 +5,7 @@
 
 use core::str::FromStr;
 use embassy_executor::Spawner;
+use embassy_net::udp::PacketMetadata;
 use embassy_net::{Config, Stack, StackResources};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -26,6 +27,7 @@ use esp_wifi::{
     },
     EspWifiInitFor,
 };
+use sntpc::NtpResult;
 use static_cell::make_static;
 
 pub enum MessageType {
@@ -33,7 +35,7 @@ pub enum MessageType {
     WeatherUpdate(&'static Signal<CriticalSectionRawMutex, WeatherResponse>),
 }
 
-pub struct TimeResponse {}
+pub type TimeResponse = Option<NtpResult>;
 pub struct WeatherResponse {}
 
 /// A bus for coordinating commands that can be actioned by the network task
@@ -104,8 +106,6 @@ pub async fn wifi(
     spawner.spawn(connection(controller)).ok();
     spawner.spawn(net_task(stack)).ok();
 
-    let rx_buffer = [0; 4096];
-
     loop {
         if stack.is_link_up() {
             break;
@@ -122,9 +122,30 @@ pub async fn wifi(
         Timer::after(Duration::from_millis(500)).await;
     }
 
-    // let state: TcpClientState<1, 1024, 1024> = TcpClientState::new();
-    // let client = TcpClient::new(stack, &state);
-    // let mut client = HttpClient::new(&client, &crate::dns::StaticDns);
+    loop {
+        let msg = NETWORK_BUS.receive().await;
+        match msg {
+            MessageType::TimeUpdate(sig) => {
+                let mut rx_meta = [PacketMetadata::EMPTY; 16];
+                let mut rx_buffer = [0; 4096];
+                let mut tx_meta = [PacketMetadata::EMPTY; 16];
+                let mut tx_buffer = [0; 4096];
+                let mut socket = embassy_net::udp::UdpSocket::new(
+                    stack,
+                    &mut rx_meta,
+                    &mut rx_buffer,
+                    &mut tx_meta,
+                    &mut tx_buffer,
+                );
+                socket.bind(9400).unwrap();
+                defmt::info!("getting time");
+                let res = crate::time::get_time(socket).await;
+                defmt::info!("sending result {}", res.is_some());
+                sig.signal(res);
+            }
+            _ => unimplemented!(),
+        }
+    }
 }
 
 #[embassy_executor::task]

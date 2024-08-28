@@ -2599,6 +2599,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sntpc"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de6292f240a2bf33ae7156cb354802bca8ecfacf96b820a6ec2f2e9f5c01f260"
+dependencies = [
+ "no-std-net",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3059,6 +3068,8 @@ dependencies = [
  "pin-utils",
  "reqwless",
  "slint-build",
+ "smoltcp",
+ "sntpc",
  "static_cell",
 ]
 

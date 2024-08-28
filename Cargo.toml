@@ -61,9 +61,7 @@ futures = { version = "0.3.30", default-features = false, features = [
 ] }
 pin-project-lite = "0.2.14"
 embedded-nal-async = "0.7.1"
-esp-wifi = { version = "0.7.1", default-features = false, features = ["esp32s3", "wifi", "embassy-net", "defmt", "utils", "smoltcp", "ipv4",
-# "wifi-logs",
-"phy-enable-usb"] }
+esp-wifi = { version = "0.7.1", default-features = false, features = ["esp32s3", "wifi", "embassy-net", "defmt", "utils", "smoltcp", "ipv4", "phy-enable-usb"] }
 reqwless = { version = "0.12.1", default-features = false, features = [
     "defmt",
 ] }
@@ -71,15 +69,11 @@ heapless = { version = "0.8.0", features = ["defmt-03"] }
 embedded-svc = { version = "0.28.0", default-features = false, features = [
     "nightly",
 ] }
-embassy-net = { version = "0.4.0", features = [
-    "tcp",
-    "dhcpv4",
-    "medium-ethernet",
-    "dns",
-    "defmt",
-] }
+embassy-net = { version = "0.4.0", features = ["tcp", "dhcpv4", "medium-ethernet", "dns", "defmt", "udp"] }
 pin-utils = "0.1.0"
 esp-wifi-sys = "0.4.0"
+sntpc = { version = "0.3.9", default-features = false, features = ["async"] }
+smoltcp = { version = "0.11.0", default-features = false, features = ["async", "defmt", "socket", "socket-udp"] }
 # slint = { version = "1.7.2", default-features = false, features = ["compat-1-2", "unsafe-single-threaded", "libm", "renderer-software"] }
 
 [patch.crates-io]

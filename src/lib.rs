@@ -8,10 +8,11 @@ use esp_hal::{peripherals::LPWR, reset::SleepSource};
 mod battery;
 mod dns;
 mod throttle;
+mod time;
 mod ui;
 mod wifi;
 
-pub use wifi::wifi;
+pub use wifi::{get_time, get_weather, wifi};
 
 pub use battery::{BatteryStatus, BatteryStatusDriver};
 pub use ui::drive_display;
