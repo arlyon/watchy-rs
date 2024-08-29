@@ -1,0 +1,13 @@
+[build]
+target = "xtensa-esp32s3-espidf"
+rustflags = ["-C", "link-arg=-nostartfiles"]
+
+[target.'cfg(target_arch = "xtensa")']
+runner = "espflash flash --monitor --log-format defmt"
+
+[unstable]
+build-std = ["core"]
+
+# set env
+[env]
+DEFMT_LOG = "info"
