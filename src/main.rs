@@ -6,7 +6,6 @@
 
 extern crate alloc;
 
-use chrono::NaiveDateTime;
 use esp_backtrace as _;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_println as _;

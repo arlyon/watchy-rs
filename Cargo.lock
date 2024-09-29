@@ -2312,6 +2312,7 @@ dependencies = [
  "static_cell",
  "time",
  "ufmt",
+ "xtensa-lx-rt",
 ]
 
 [[package]]

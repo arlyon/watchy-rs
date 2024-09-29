@@ -100,6 +100,10 @@ embedded-fonts = { version = "0.1.0" }
 ufmt = "0.2.0"
 esp-alloc = { version = "0.4.0", features = ["nightly"] }
 chrono = { version = "0.4.38", default-features = false }
+xtensa-lx-rt = { version = "0.17.1", features = [
+    "float-save-restore",
+    "esp32s3",
+] }
 # slint = { version = "1.7.2", default-features = false, features = ["compat-1-2", "unsafe-single-threaded", "libm", "renderer-software"] }
 
 [patch.crates-io]
@@ -113,6 +117,7 @@ esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78
 esp-wifi = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
 esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
 esp-alloc = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
+xtensa-lx-rt = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
 
 # fork for updated embedded-graphics
 embedded-fonts = { git = "https://github.com/arlyon/embedded-fonts.git" }

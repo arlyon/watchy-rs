@@ -40,7 +40,8 @@ pub struct WeatherResponse {}
 
 /// A bus for coordinating commands that can be actioned by the network task
 static NETWORK_BUS: Channel<CriticalSectionRawMutex, MessageType, 10> = Channel::new();
-static ENABLE_NETWORK: StickySignal<CriticalSectionRawMutex, bool, 4> = StickySignal::new();
+static ENABLE_NETWORK: StickySignal<CriticalSectionRawMutex, bool, 4> =
+    StickySignal::new_with_name("enable_network");
 
 static SSID: &str = "NOW1QQ9L";
 const PASSWORD: &str = include_str!("../wifi-password.txt");
@@ -164,9 +165,10 @@ async fn connection(mut controller: WifiController<'static>) {
     let mut connect_failures = 0;
     const MAX_CONNECT_FAILURES: usize = 3;
     loop {
+        defmt::trace!("wifi loop");
         if esp_wifi::wifi::get_wifi_state() == WifiState::StaConnected {
             match select(
-                ENABLE_NETWORK.wait_for(|val| (!val).then(|| false)),
+                ENABLE_NETWORK.wait_for("wifi loop disabled", |val| (!val).then_some(false)),
                 controller.wait_for_event(WifiEvent::StaDisconnected),
             )
             .await
@@ -184,7 +186,9 @@ async fn connection(mut controller: WifiController<'static>) {
         }
         if !matches!(controller.is_started(), Ok(true)) {
             // if we haven't started, wait until we should start
-            ENABLE_NETWORK.wait_for(|val| val.then(|| true)).await;
+            ENABLE_NETWORK
+                .wait_for("wait to start wifi", |val| val.then_some(true))
+                .await;
 
             let client_config = Configuration::Client(ClientConfiguration {
                 ssid: heapless::String::from_str(SSID).unwrap(),
@@ -221,9 +225,13 @@ async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
     // wait for network to be enabled, then select on it being disabled
 
     loop {
-        ENABLE_NETWORK.wait_for(|val| val.then(|| true)).await;
+        defmt::trace!("net loop");
+        ENABLE_NETWORK
+            .wait_for("net loop enabled", |val| val.then_some(true))
+            .await;
+        defmt::trace!("network enabled");
         match select(
-            ENABLE_NETWORK.wait_for(|val| (!val).then(|| false)),
+            ENABLE_NETWORK.wait_for("net loop disabled", |val| (!val).then_some(false)),
             stack.run(),
         )
         .await
