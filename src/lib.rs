@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
-#![feature(error_in_core)]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 use defmt::write;
 use esp_hal::{peripherals::LPWR, reset::SleepSource};

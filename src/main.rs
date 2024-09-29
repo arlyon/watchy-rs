@@ -1,8 +1,8 @@
 #![no_std]
 #![no_main]
-#![feature(error_in_core)]
 #![feature(type_alias_impl_trait)]
 #![deny(clippy::unwrap_used)]
+#![feature(impl_trait_in_assoc_type)]
 
 use esp_backtrace as _;
 use esp_println as _;
