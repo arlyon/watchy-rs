@@ -8,18 +8,15 @@ use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
 use embassy_net::udp::PacketMetadata;
 use embassy_net::{Config, Stack, StackResources};
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::peripherals::RADIO_CLK;
+use esp_hal::peripherals::{RNG, WIFI};
 use esp_hal::rng::Rng;
 use esp_hal::timer::{ErasedTimer, PeriodicTimer};
-use esp_hal::{
-    clock::Clocks,
-    peripherals::{RNG, WIFI},
-};
 use esp_wifi::{
     initialize,
     wifi::{
@@ -82,7 +79,6 @@ pub async fn wifi(
     timer: PeriodicTimer<'static, ErasedTimer>,
     rng: RNG,
     radio_clock_control: RADIO_CLK,
-    clocks: &'static Clocks<'_>,
     wifi: WIFI,
     spawner: Spawner,
 ) {
@@ -91,7 +87,6 @@ pub async fn wifi(
         timer,
         Rng::new(rng),
         radio_clock_control,
-        clocks,
     )
     .unwrap();
 

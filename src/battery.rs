@@ -1,9 +1,8 @@
 //! Battery status using the ADC.
 
-use defmt::println;
 use esp_hal::{
     analog::adc::{Adc, AdcCalLine, AdcConfig, Attenuation},
-    gpio::Gpio9,
+    gpio::{ErasedPin, GpioPin, Input, Level, Pull},
     peripherals::ADC1,
     prelude::nb,
 };
@@ -36,6 +35,8 @@ impl BatteryStatus {
 /// peripheral on the ESP32.
 pub struct BatteryStatusDriver<'d> {
     adc1_pin: esp_hal::analog::adc::AdcPin<esp_hal::gpio::GpioPin<9>, ADC1, AdcCalLine<ADC1>>,
+    // chrg_pin: esp_hal::analog::adc::AdcPin<esp_hal::gpio::GpioPin<10>, ADC1, AdcCalLine<ADC1>>,
+    chrg_pin: Input<'d, ErasedPin>,
     adc1: Adc<'d, ADC1>,
 }
 impl<'d> BatteryStatusDriver<'d> {
@@ -49,18 +50,25 @@ impl<'d> BatteryStatusDriver<'d> {
     ///     watchy::battery::BatteryStatusDriver::new(pin_sets.battery, peripherals.adc1).unwrap();
     /// ```
     pub fn new<P: esp_hal::peripheral::Peripheral<P = ADC1> + 'd>(
-        battery_pin: Gpio9,
+        battery_pin: GpioPin<9>,
+        chrg_pin: GpioPin<10>,
         adc: P,
     ) -> Self {
         // Create ADC instances
         let mut adc1_config = AdcConfig::new();
-        let adc1_pin = adc1_config.enable_pin_with_cal::<Gpio9, AdcCalLine<ADC1>>(
+        let adc1_pin = adc1_config.enable_pin_with_cal::<GpioPin<9>, AdcCalLine<ADC1>>(
             battery_pin,
             Attenuation::Attenuation11dB,
         );
         let adc1 = Adc::new(adc, adc1_config);
 
-        Self { adc1_pin, adc1 }
+        let chrg_pin = Input::new(chrg_pin, Pull::Up);
+
+        Self {
+            adc1_pin,
+            adc1,
+            chrg_pin,
+        }
     }
 
     /// Retrieve the battery status by sampling the ADC.
@@ -69,6 +77,13 @@ impl<'d> BatteryStatusDriver<'d> {
             return Err(());
         };
         Ok(BatteryStatus(u32::from(val)))
+    }
+
+    /// The battery is charging if the charge pin is low.
+    pub fn charging(&mut self) -> Level {
+        let level = self.chrg_pin.get_level();
+        defmt::info!("reading charge pin {:?}", level);
+        level
     }
 }
 

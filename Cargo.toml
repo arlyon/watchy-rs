@@ -18,7 +18,8 @@ crate-type = ["lib"]
 harness = false
 
 [profile.release]
-opt-level = "s"
+opt-level = 3
+lto = "thin"
 debug = true      # does not get flashed
 codegen-units = 1
 panic = "abort"
@@ -28,7 +29,6 @@ epd-waveshare = { git = "https://github.com/caemor/epd-waveshare.git" }
 embedded-graphics = "0.8.1"
 embassy-executor = { version = "0.6.0", features = ["nightly"] }
 esp-hal = { version = "0.20.1", default-features = false, features = [
-    "async",
     "defmt",
     "esp32s3",
 ] }
@@ -69,6 +69,7 @@ esp-wifi = { version = "0.9.1", default-features = false, features = [
     "smoltcp",
     "ipv4",
     "phy-enable-usb",
+    "esp-alloc",
 ] }
 reqwless = { version = "0.12.1", default-features = false, features = [
     "defmt",
@@ -97,6 +98,8 @@ itoa = "1.0.11"
 time = { version = "0.3.36", default-features = false }
 embedded-fonts = { version = "0.1.0" }
 ufmt = "0.2.0"
+esp-alloc = { version = "0.4.0", features = ["nightly"] }
+chrono = { version = "0.4.38", default-features = false }
 # slint = { version = "1.7.2", default-features = false, features = ["compat-1-2", "unsafe-single-threaded", "libm", "renderer-software"] }
 
 [patch.crates-io]
@@ -105,6 +108,11 @@ embassy-net-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = 
 embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
 embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
 embassy-time-queue-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+
+esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
+esp-wifi = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
+esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
 
 # fork for updated embedded-graphics
 embedded-fonts = { git = "https://github.com/arlyon/embedded-fonts.git" }

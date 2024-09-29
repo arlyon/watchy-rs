@@ -35,9 +35,7 @@ impl GlobalTime {
 
     /// Get the time based on the system time + offset
     pub fn get_time(&self) -> u64 {
-        let microseconds = esp_hal::time::current_time()
-            .duration_since_epoch()
-            .to_micros();
+        let microseconds = esp_hal::time::now().duration_since_epoch().to_micros();
 
         let offset = self.offset_micros.peek().unwrap_or_default();
 
@@ -59,7 +57,7 @@ impl GlobalTime {
         futures::stream::unfold(ticker, move |mut ticker| async move {
             match select::select(ticker.next(), self.offset_micros.wait()).await {
                 select::Either::First(()) => Some((self.get_time(), ticker)),
-                select::Either::Second(offset) => {
+                select::Either::Second(_) => {
                     defmt::info!("offset changed, exiting");
                     None
                 }
@@ -75,9 +73,7 @@ struct StdTimestampGen {
 
 impl NtpTimestampGenerator for StdTimestampGen {
     fn init(&mut self) {
-        let microseconds = esp_hal::time::current_time()
-            .duration_since_epoch()
-            .to_micros();
+        let microseconds = esp_hal::time::now().duration_since_epoch().to_micros();
         self.duration = core::time::Duration::from_micros(microseconds);
     }
 

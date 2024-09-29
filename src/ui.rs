@@ -1,11 +1,7 @@
 use embedded_fonts::BdfTextStyle;
 use embedded_graphics::{mono_font::MonoTextStyleBuilder, prelude::*, text::Text};
 use epd_waveshare::{epd1in54::Display1in54, prelude::*};
-use esp_hal::{
-    gpio::{Gpio10, Gpio9},
-    peripherals::ADC1,
-    prelude::*,
-};
+use esp_hal::{gpio::GpioPin, peripherals::ADC1, prelude::*};
 use futures::{pin_mut, StreamExt};
 
 use core::cell::RefCell;
@@ -13,9 +9,8 @@ use embassy_embedded_hal::shared_bus::blocking::spi::SpiDevice;
 use embassy_sync::blocking_mutex::{raw::NoopRawMutex, Mutex};
 use epd_waveshare::epd1in54_v2::Epd1in54;
 use esp_hal::{
-    clock::Clocks,
     delay::Delay,
-    gpio::{Gpio33, Gpio34, Gpio35, Gpio36, Gpio46, Gpio47, Gpio48, Input, Level, Output, Pull},
+    gpio::{Input, Level, Output, Pull},
     peripherals::SPI2,
     spi::master::Spi,
 };
@@ -30,17 +25,17 @@ const TIMEZONE: time::UtcOffset = match time::UtcOffset::from_hms(1, 0, 0) {
 #[embassy_executor::task]
 pub async fn drive_display(
     spi: SPI2,
-    sck: Gpio47,
-    miso: Gpio46,
-    mosi: Gpio48,
-    cs: Gpio33,
-    dc: Gpio34,
-    reset: Gpio35,
-    busy: Gpio36,
-    clocks: &'static Clocks<'static>,
+    sck: GpioPin<47>,
+    miso: GpioPin<46>,
+    mosi: GpioPin<48>,
+    cs: GpioPin<33>,
+    dc: GpioPin<34>,
+    reset: GpioPin<35>,
+    busy: GpioPin<36>,
     global_time: GlobalTime,
     mut delay: Delay,
-    battery_adc: Gpio9,
+    battery_adc: GpioPin<9>,
+    charge_pin: GpioPin<10>,
     adc: ADC1,
 ) {
     let pin_spi_edp_cs = Output::new(cs, Level::Low);
@@ -48,7 +43,7 @@ pub async fn drive_display(
     let pin_edp_reset = Output::new(reset, Level::Low);
     let pin_edp_busy = Input::new(busy, Pull::Up);
 
-    let spi = Spi::new(spi, 2.MHz(), esp_hal::spi::SpiMode::Mode0, clocks)
+    let spi = Spi::new(spi, 2.MHz(), esp_hal::spi::SpiMode::Mode0)
         .with_sck(sck)
         .with_miso(miso)
         .with_mosi(mosi);
@@ -75,7 +70,7 @@ pub async fn drive_display(
         None,
     ];
 
-    let mut battery = BatteryStatusDriver::new(battery_adc, adc);
+    let mut battery = BatteryStatusDriver::new(battery_adc, charge_pin, adc);
 
     loop {
         defmt::info!("starting draw loop");
@@ -151,8 +146,19 @@ pub async fn drive_display(
 
                 {
                     let bat = battery.status().await.unwrap();
-                    let mut string = heapless::String::<12>::new();
-                    ufmt::uwrite!(string, "{}mV ({}%)", bat.voltage(), bat.percentage()).unwrap();
+                    let mut string = heapless::String::<20>::new();
+
+                    ufmt::uwrite!(
+                        string,
+                        "{}mV ({}%) {}",
+                        bat.voltage(),
+                        bat.percentage(),
+                        match battery.charging() {
+                            Level::Low => "low",
+                            Level::High => "high",
+                        }
+                    )
+                    .unwrap();
                     let _ =
                         Text::new(&string, Point::new(60, 195), battery_style).draw(&mut display);
                 }
