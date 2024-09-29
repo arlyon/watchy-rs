@@ -1,7 +1,11 @@
 use embedded_fonts::BdfTextStyle;
-use embedded_graphics::{prelude::*, text::Text};
+use embedded_graphics::{mono_font::MonoTextStyleBuilder, prelude::*, text::Text};
 use epd_waveshare::{epd1in54::Display1in54, prelude::*};
-use esp_hal::prelude::*;
+use esp_hal::{
+    gpio::{Gpio10, Gpio9},
+    peripherals::ADC1,
+    prelude::*,
+};
 use futures::{pin_mut, StreamExt};
 
 use core::cell::RefCell;
@@ -16,7 +20,7 @@ use esp_hal::{
     spi::master::Spi,
 };
 
-use crate::GlobalTime;
+use crate::{BatteryStatusDriver, GlobalTime};
 
 const TIMEZONE: time::UtcOffset = match time::UtcOffset::from_hms(1, 0, 0) {
     Ok(v) => v,
@@ -36,6 +40,8 @@ pub async fn drive_display(
     clocks: &'static Clocks<'static>,
     global_time: GlobalTime,
     mut delay: Delay,
+    battery_adc: Gpio9,
+    adc: ADC1,
 ) {
     let pin_spi_edp_cs = Output::new(cs, Level::Low);
     let pin_edp_dc = Output::new(dc, Level::Low);
@@ -68,6 +74,8 @@ pub async fn drive_display(
         None,
         None,
     ];
+
+    let mut battery = BatteryStatusDriver::new(battery_adc, adc);
 
     loop {
         defmt::info!("starting draw loop");
@@ -109,6 +117,11 @@ pub async fn drive_display(
                 Color::Black,
             );
 
+            let battery_style = MonoTextStyleBuilder::new()
+                .font(&embedded_graphics::mono_font::ascii::FONT_7X14_BOLD)
+                .text_color(Color::Black)
+                .build();
+
             // Use display graphics from embedded-graphics
             let display = {
                 let mut display = Display1in54::default();
@@ -134,6 +147,14 @@ pub async fn drive_display(
                         ufmt::uwrite!(string, "{}", date.minute()).unwrap();
                     };
                     let _ = Text::new(&string, Point::new(115, 50), style).draw(&mut display);
+                }
+
+                {
+                    let bat = battery.status().await.unwrap();
+                    let mut string = heapless::String::<12>::new();
+                    ufmt::uwrite!(string, "{}mV ({}%)", bat.voltage(), bat.percentage()).unwrap();
+                    let _ =
+                        Text::new(&string, Point::new(60, 195), battery_style).draw(&mut display);
                 }
 
                 display

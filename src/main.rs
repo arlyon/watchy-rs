@@ -79,8 +79,6 @@ async fn main(low_prio_spawner: Spawner) {
             io.pins.gpio8,
             io.pins.gpio14,
             io.pins.gpio13,
-            io.pins.gpio10,
-            peripherals.ADC1,
             vibration_motor,
         ));
     }
@@ -116,6 +114,8 @@ async fn main(low_prio_spawner: Spawner) {
         clocks,
         global_time,
         delay,
+        io.pins.gpio9,
+        peripherals.ADC1,
     ));
 
     {
@@ -195,8 +195,6 @@ async fn handle_buttons(
     p4: Gpio8,
     acc_int_1: Gpio14,
     _acc_int_2: Gpio13,
-    stat: Gpio10,
-    adc: ADC1,
     vibration: &'static mut Output<'static, Gpio17>,
 ) {
     let vibration_signal = embassy_sync::signal::Signal::<NoopRawMutex, _>::new();
@@ -207,14 +205,6 @@ async fn handle_buttons(
     let mut button_3 = Debouncer::new(Input::new(p3, Pull::None), debounce_time);
     let mut button_4 = Debouncer::new(Input::new(p4, Pull::None), debounce_time);
     let mut interrupt = Debouncer::new(Input::new(acc_int_1, Pull::Up), debounce_time);
-
-    let mut battery = watchy_rs::BatteryStatusDriver::new(stat, adc);
-
-    defmt::info!("getting battery status");
-    let status = battery.status().await.unwrap();
-    defmt::info!("status: {:?}", status.voltage());
-
-    let mut is_charging = false;
 
     let drive_accel = async {
         loop {
@@ -249,20 +239,14 @@ async fn handle_buttons(
                 button_4.wait_for_falling_edge(),
             );
 
-            let res = embassy_futures::select::select(
-                buttons,
-                // todo
-                // charging.wait_for_falling_edge()
-                future::pending::<()>(),
-            )
-            .await;
+            let res = embassy_futures::select::select(buttons, future::pending::<()>()).await;
 
             match res {
                 Either::First(a) => {
                     vibration_signal.signal(60);
                     match a {
                         Either4::First(_) => {
-                            defmt::info!("charging: {}", is_charging);
+                            defmt::info!("button 1 pressed");
                         }
                         Either4::Second(_) => {
                             defmt::info!("button 2 pressed");
@@ -277,7 +261,6 @@ async fn handle_buttons(
                 }
                 Either::Second(_) => {
                     vibration_signal.signal(60);
-                    is_charging = true
                 }
             }
         }
