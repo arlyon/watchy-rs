@@ -153,9 +153,9 @@ pub async fn drive_display(
                         "{}mV ({}%) {}",
                         bat.voltage(),
                         bat.percentage(),
-                        match battery.charging() {
-                            Level::Low => "low",
-                            Level::High => "high",
+                        match battery.charging().await {
+                            true => "+",
+                            false => "",
                         }
                     )
                     .unwrap();

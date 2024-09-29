@@ -35,8 +35,8 @@ impl BatteryStatus {
 /// peripheral on the ESP32.
 pub struct BatteryStatusDriver<'d> {
     adc1_pin: esp_hal::analog::adc::AdcPin<esp_hal::gpio::GpioPin<9>, ADC1, AdcCalLine<ADC1>>,
-    // chrg_pin: esp_hal::analog::adc::AdcPin<esp_hal::gpio::GpioPin<10>, ADC1, AdcCalLine<ADC1>>,
-    chrg_pin: Input<'d, ErasedPin>,
+    chrg_pin: esp_hal::analog::adc::AdcPin<esp_hal::gpio::GpioPin<10>, ADC1, AdcCalLine<ADC1>>,
+    // chrg_pin: Input<'d, ErasedPin>,
     adc1: Adc<'d, ADC1>,
 }
 impl<'d> BatteryStatusDriver<'d> {
@@ -60,9 +60,13 @@ impl<'d> BatteryStatusDriver<'d> {
             battery_pin,
             Attenuation::Attenuation11dB,
         );
+        let chrg_pin = adc1_config.enable_pin_with_cal::<GpioPin<10>, AdcCalLine<ADC1>>(
+            chrg_pin,
+            Attenuation::Attenuation11dB,
+        );
         let adc1 = Adc::new(adc, adc1_config);
 
-        let chrg_pin = Input::new(chrg_pin, Pull::Up);
+        // let chrg_pin = Input::new(chrg_pin, Pull::Up);
 
         Self {
             adc1_pin,
@@ -85,10 +89,17 @@ impl<'d> BatteryStatusDriver<'d> {
     }
 
     /// The battery is charging if the charge pin is low.
-    pub fn charging(&mut self) -> Level {
-        let level = self.chrg_pin.get_level();
-        defmt::info!("reading charge pin {:?}", level);
-        level
+    pub async fn charging(&mut self) -> bool {
+        // let level = self.chrg_pin.get_level();
+        // defmt::info!("reading charge pin {:?}", level);
+        // level
+
+        let Ok(voltage) = crate::block_embassy!(self.adc1.read_oneshot(&mut self.chrg_pin)) else {
+            return false;
+        };
+
+        // over 3000 is charging
+        voltage > 3000
     }
 }
 
