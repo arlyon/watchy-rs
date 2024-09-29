@@ -17,14 +17,14 @@ use embassy_futures::select::{Either, Either4};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::{Duration, Timer};
 use embedded_hal_async::digital::Wait;
-use esp_hal::clock::{ClockControl, Clocks};
+use esp_hal::clock::{ClockControl, Clocks, CpuClock};
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{
-    Gpio0, Gpio10, Gpio13, Gpio14, Gpio17, Gpio6, Gpio7, Gpio8, Input, Io, Level, Output, Pull,
+    Gpio0, Gpio13, Gpio14, Gpio17, Gpio6, Gpio7, Gpio8, Input, Io, Level, Output, Pull,
 };
 use esp_hal::i2c::I2C;
 use esp_hal::interrupt::Priority;
-use esp_hal::peripherals::{Peripherals, ADC1, I2C0};
+use esp_hal::peripherals::{Peripherals, I2C0};
 use esp_hal::system::SystemControl;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::timer::{ErasedTimer, OneShotTimer, PeriodicTimer};
@@ -36,7 +36,6 @@ use watchy_rs::GlobalTime;
 static CLOCK: StaticCell<Clocks> = StaticCell::new();
 static I2C_G: StaticCell<I2C0> = StaticCell::new();
 static TIMERS: StaticCell<[OneShotTimer<ErasedTimer>; 1]> = StaticCell::new();
-
 static VIBRATION: StaticCell<Output<Gpio17>> = StaticCell::new();
 
 /// Run the OS
@@ -50,12 +49,13 @@ async fn main(low_prio_spawner: Spawner) {
     defmt::info!("starting due to {:?}", cause);
 
     let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = CLOCK.init(ClockControl::max(system.clock_control).freeze());
+    let clocks =
+        CLOCK.init(ClockControl::configure(system.clock_control, CpuClock::Clock80MHz).freeze());
     let delay = Delay::new(clocks);
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
     let embassy_timers = {
-        let timg0 = TimerGroup::new(peripherals.TIMG0, clocks, None);
+        let timg0 = TimerGroup::new(peripherals.TIMG0, clocks);
         let timer0: ErasedTimer = timg0.timer0.into();
         let timers = [OneShotTimer::new(timer0)];
         TIMERS.init(timers)
@@ -85,7 +85,7 @@ async fn main(low_prio_spawner: Spawner) {
 
     {
         let wifi_timer = {
-            let timg1 = TimerGroup::new(peripherals.TIMG1, clocks, None);
+            let timg1 = TimerGroup::new(peripherals.TIMG1, clocks);
             let timer0: ErasedTimer = timg1.timer0.into();
             PeriodicTimer::new(timer0)
         };

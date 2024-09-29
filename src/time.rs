@@ -10,7 +10,7 @@ use futures::Stream;
 use sntpc::{NtpContext, NtpResult, NtpTimestampGenerator};
 use static_cell::StaticCell;
 
-static OFFSET: StaticCell<StickySignal<NoopRawMutex, u64>> = StaticCell::new();
+static OFFSET: StaticCell<StickySignal<NoopRawMutex, u64, 4>> = StaticCell::new();
 
 /// A time struct. This is initialized to empty and is updated when
 /// the time changes.
@@ -20,7 +20,7 @@ pub struct GlobalTime {
     ///
     /// This number is usually determined using an ntp server and
     /// updated later.
-    offset_micros: &'static StickySignal<NoopRawMutex, u64>,
+    offset_micros: &'static StickySignal<NoopRawMutex, u64, 4>,
 }
 
 impl GlobalTime {

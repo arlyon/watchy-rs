@@ -6,12 +6,12 @@ use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
 // TODO: allow resolving updates after the first
-enum State<T> {
+enum State<T, const WAKERS: usize> {
     None,
-    Waiting(Waker),
+    Waiting(heapless::Vec<Waker, WAKERS>),
     Signaled(T),
     Occupied(T),
-    OccupiedWaiting(T, Waker),
+    OccupiedWaiting(T, heapless::Vec<Waker, WAKERS>),
 }
 
 /// Single-slot signaling primitive that retains the value after being read.
@@ -32,14 +32,14 @@ enum State<T> {
 ///
 /// static SOME_STICKY_SIGNAL: StickySignal<CriticalSectionRawMutex, SomeCommand> = StickySignal::new();
 /// ```
-pub struct StickySignal<M, T>
+pub struct StickySignal<M, T, const WAKERS: usize>
 where
     M: RawMutex,
 {
-    state: Mutex<M, RefCell<State<T>>>,
+    state: Mutex<M, RefCell<State<T, WAKERS>>>,
 }
 
-impl<M, T> StickySignal<M, T>
+impl<M, T, const WAKERS: usize> StickySignal<M, T, WAKERS>
 where
     M: RawMutex,
 {
@@ -51,7 +51,7 @@ where
     }
 }
 
-impl<M, T> Default for StickySignal<M, T>
+impl<M, T, const WAKERS: usize> Default for StickySignal<M, T, WAKERS>
 where
     M: RawMutex,
 {
@@ -60,7 +60,7 @@ where
     }
 }
 
-impl<M, T: Send> StickySignal<M, T>
+impl<M, T: Send, const WAKERS: usize> StickySignal<M, T, WAKERS>
 where
     M: RawMutex,
     T: Copy + Clone,
@@ -70,7 +70,9 @@ where
         self.state.lock(|cell| {
             let state = cell.replace(State::Signaled(val));
             if let State::Waiting(waker) | State::OccupiedWaiting(_, waker) = state {
-                waker.wake();
+                for waker in waker {
+                    waker.wake()
+                }
             }
         })
     }
@@ -85,27 +87,33 @@ where
             let mut s = cell.borrow_mut();
             match &mut *s {
                 s @ State::None => {
-                    *s = State::Waiting(cx.waker().clone());
+                    *s = State::Waiting(
+                        heapless::Vec::from_slice(&[cx.waker().clone()]).expect("not enough slots"),
+                    );
                     Poll::Pending
                 }
-                State::Waiting(w) | State::OccupiedWaiting(_, w) if w.will_wake(cx.waker()) => {
+                // if this waiter is already registered, just continue
+                State::Waiting(w) | State::OccupiedWaiting(_, w)
+                    if w.iter().any(|w| w.will_wake(cx.waker())) =>
+                {
                     Poll::Pending
                 }
+                // if this waiter is not registered, register it
                 s @ State::Waiting(_) => {
-                    let State::Waiting(w) = core::mem::replace(s, State::None) else {
+                    let State::Waiting(mut w) = core::mem::replace(s, State::None) else {
                         panic!("will never happen")
                     };
-                    *s = State::Waiting(cx.waker().clone());
-                    w.wake();
+                    w.push(cx.waker().clone()).unwrap();
+                    *s = State::Waiting(w);
                     Poll::Pending
                 }
                 s @ State::OccupiedWaiting(_, _) => {
-                    let State::OccupiedWaiting(inner, w) = core::mem::replace(s, State::None)
+                    let State::OccupiedWaiting(inner, mut w) = core::mem::replace(s, State::None)
                     else {
                         panic!("will never happen")
                     };
-                    *s = State::OccupiedWaiting(inner, cx.waker().clone());
-                    w.wake();
+                    w.push(cx.waker().clone()).unwrap();
+                    *s = State::OccupiedWaiting(inner, w);
                     Poll::Pending
                 }
                 s @ State::Signaled(_) => {
@@ -119,7 +127,10 @@ where
                     let State::Occupied(inner) = core::mem::replace(s, State::None) else {
                         panic!()
                     };
-                    *s = State::OccupiedWaiting(inner, cx.waker().clone());
+                    *s = State::OccupiedWaiting(
+                        inner,
+                        heapless::Vec::from_slice(&[cx.waker().clone()]).expect("not enough slots"),
+                    );
                     Poll::Pending
                 }
             }
@@ -129,6 +140,21 @@ where
     /// Future that completes when this StickySignal has been signaled.
     pub fn wait(&self) -> impl Future<Output = T> + '_ {
         poll_fn(move |cx| self.poll_wait(cx))
+    }
+
+    /// Future that completes when f returns Some(U). This will also check
+    /// the current value.
+    pub async fn wait_for<U>(&self, f: impl Fn(T) -> Option<U>) -> U {
+        if let Some(val) = self.peek().and_then(&f) {
+            return val;
+        }
+
+        loop {
+            let val = self.wait().await;
+            if let Some(val) = f(val) {
+                return val;
+            }
+        }
     }
 
     /// non-blocking method to try and take a reference to the signal value.
