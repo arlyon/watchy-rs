@@ -73,10 +73,15 @@ impl<'d> BatteryStatusDriver<'d> {
 
     /// Retrieve the battery status by sampling the ADC.
     pub async fn status(&mut self) -> Result<BatteryStatus, ()> {
-        let Ok(val) = crate::block_embassy!(self.adc1.read_oneshot(&mut self.adc1_pin)) else {
+        let Ok(voltage) = crate::block_embassy!(self.adc1.read_oneshot(&mut self.adc1_pin)) else {
             return Err(());
         };
-        Ok(BatteryStatus(u32::from(val)))
+
+        // adjust voltage based on the algo in the watchy firmware
+        let voltage = voltage as f32 * ((360.0 + 100.0) / 360.0);
+        let voltage = voltage as u32;
+
+        Ok(BatteryStatus(voltage))
     }
 
     /// The battery is charging if the charge pin is low.
