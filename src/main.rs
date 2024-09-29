@@ -36,6 +36,7 @@ use watchy_rs::GlobalTime;
 
 static TIMERS: StaticCell<[OneShotTimer<ErasedTimer>; 1]> = StaticCell::new();
 static VIBRATION: StaticCell<Output<ErasedPin>> = StaticCell::new();
+static RTC: StaticCell<Rtc> = StaticCell::new();
 
 /// Run the OS
 ///
@@ -55,8 +56,7 @@ async fn main(low_prio_spawner: Spawner) {
     let cause = watchy_rs::get_wakeup_cause(&peripherals.LPWR);
     defmt::info!("starting due to {:?}", cause);
 
-    let rtc = Rtc::new(peripherals.LPWR);
-    rtc.set_current_time(NaiveDateTime::from_timestamp(0, 0));
+    let rtc = RTC.init(Rtc::new(peripherals.LPWR));
 
     let delay = Delay::new();
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
@@ -107,7 +107,7 @@ async fn main(low_prio_spawner: Spawner) {
         ));
     }
 
-    let global_time = GlobalTime::new();
+    let global_time = GlobalTime::new(rtc);
 
     low_prio_spawner.must_spawn(watchy_rs::drive_display(
         peripherals.SPI2,
@@ -146,6 +146,7 @@ async fn main(low_prio_spawner: Spawner) {
             panic!("invalid response");
         }
         global_time.init_offset(time.offset as u64);
+        global_time.init_time(time.seconds, time.seconds_fraction);
         defmt::info!("seconds: {}", time.offset);
     } else {
         defmt::info!("couldn't get time");
