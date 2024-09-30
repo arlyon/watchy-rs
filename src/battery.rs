@@ -60,12 +60,45 @@ impl<'d> BatteryStatusDriver<'d> {
     }
 
     /// Retrieve the battery status by sampling the ADC.
-    pub fn status(&mut self) -> Result<BatteryStatus, ()> {
-        let Ok(val) = nb::block!(self.adc1.read_oneshot(&mut self.adc1_pin)) else {
+    pub async fn status(&mut self) -> Result<BatteryStatus, ()> {
+        let Ok(val) = crate::block_embassy!(self.adc1.read_oneshot(&mut self.adc1_pin)) else {
             return Err(());
         };
         Ok(BatteryStatus(u32::from(val)))
     }
+}
+
+/// Turns the non-blocking expression `$e` into a blocking operation.
+///
+/// This is accomplished by continuously calling the expression `$e` until it no
+/// longer returns `Error::WouldBlock`
+///
+/// # Input
+///
+/// An expression `$e` that evaluates to `nb::Result<T, E>`
+///
+/// # Output
+///
+/// - `Ok(t)` if `$e` evaluates to `Ok(t)`
+/// - `Err(e)` if `$e` evaluates to `Err(nb::Error::Other(e))`
+#[macro_export]
+macro_rules! block_embassy {
+    ($e:expr) => {
+        loop {
+            #[allow(unreachable_patterns)]
+            match $e {
+                Err(nb::Error::Other(e)) =>
+                {
+                    #[allow(unreachable_code)]
+                    break Err(e)
+                }
+                Err(nb::Error::WouldBlock) => {
+                    embassy_futures::yield_now().await;
+                }
+                Ok(x) => break Ok(x),
+            }
+        }
+    };
 }
 
 // TODO figure this out

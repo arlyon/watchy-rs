@@ -4,11 +4,12 @@
 #![feature(type_alias_impl_trait)]
 #![deny(clippy::unwrap_used)]
 
+use esp_backtrace as _;
+use esp_println as _;
+
 use async_debounce::Debouncer;
 use bma423::{Bma423, FeatureInterruptStatus, InterruptDirection, PowerControlFlag, Uninitialized};
 use embassy_embedded_hal::shared_bus::blocking::spi::SpiDevice;
-use esp_backtrace as _;
-use esp_println as _;
 
 use embassy_futures::select::{Either, Either4};
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
@@ -25,16 +26,14 @@ use esp_hal::{prelude::*, Blocking};
 
 use core::cell::RefCell;
 use core::future;
-// use embassy_embedded_hal::shared_bus::blocking::spi::SpiDevice;
 use embassy_sync::blocking_mutex::Mutex;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle};
-use epd_waveshare::epd1in54::{Display1in54, Epd1in54};
+use epd_waveshare::epd1in54_v2::{Display1in54, Epd1in54};
 
-// use bma423::{Bma423, Uninitialized};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::pubsub::PubSubChannel;
-use embassy_time::{Duration, Instant, Ticker, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use esp_hal::clock::{ClockControl, Clocks};
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{
@@ -45,10 +44,11 @@ use esp_hal::peripherals::{Peripherals, ADC1, I2C0};
 use esp_hal::spi::master::Spi;
 use esp_hal::system::SystemControl;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::timer::{ErasedTimer, OneShotTimer};
+use esp_hal::timer::{ErasedTimer, OneShotTimer, PeriodicTimer};
 use static_cell::StaticCell;
 
 // mod display;
+//
 
 pub const MSGS: usize = 50;
 pub const SUBS: usize = 2;
@@ -58,7 +58,7 @@ static CLOCK: StaticCell<Clocks> = StaticCell::new();
 static BUS: StaticCell<PubSubChannel<NoopRawMutex, (Instant, ()), MSGS, SUBS, PUBS>> =
     StaticCell::new();
 static I2C_G: StaticCell<I2C0> = StaticCell::new();
-static TIMERS: StaticCell<[OneShotTimer<ErasedTimer>; 2]> = StaticCell::new();
+static TIMERS: StaticCell<[OneShotTimer<ErasedTimer>; 1]> = StaticCell::new();
 
 static BUTTON_1: Mutex<CriticalSectionRawMutex, RefCell<Option<Input<'static, Gpio12>>>> =
     Mutex::new(RefCell::new(None));
@@ -94,10 +94,12 @@ async fn main(low_prio_spawner: Spawner) {
     let timer1 = {
         let timg1 = TimerGroup::new(peripherals.TIMG1, &clocks, None);
         let timer0: ErasedTimer = timg1.timer0.into();
-        OneShotTimer::new(timer0)
+        PeriodicTimer::new(timer0)
     };
 
-    let timers = [OneShotTimer::new(timer0), timer1];
+    // let timer = PeriodicTimer::new(timer0);
+
+    let timers = [OneShotTimer::new(timer0)];
     let timers = TIMERS.init(timers);
     esp_hal_embassy::init(clocks, timers);
 
@@ -132,6 +134,14 @@ async fn main(low_prio_spawner: Spawner) {
     defmt::info!("SPAWN TASKS");
 
     low_prio_spawner.must_spawn(handle_accel(accel, delay));
+    // low_prio_spawner.must_spawn(watchy_rs::wifi(
+    //     timer1,
+    //     peripherals.RNG,
+    //     peripherals.RADIO_CLK,
+    //     clocks,
+    //     peripherals.WIFI,
+    //     low_prio_spawner,
+    // ));
 
     static EXECUTOR: StaticCell<InterruptExecutor<2>> = StaticCell::new();
     let executor = InterruptExecutor::new(system.software_interrupt_control.software_interrupt2);
@@ -151,8 +161,6 @@ async fn main(low_prio_spawner: Spawner) {
     ));
 
     defmt::info!("Spawning low-priority tasks");
-    // low_prio_spawner.must_spawn(low_prio_async());
-    // low_prio_spawner.must_spawn(update_display());
 
     let spi2 = peripherals.SPI2;
     let pin_spi_sck = io.pins.gpio47;
@@ -163,7 +171,7 @@ async fn main(low_prio_spawner: Spawner) {
     let pin_edp_reset = Output::new(io.pins.gpio35, Level::Low);
     let pin_edp_busy = Input::new(io.pins.gpio36, Pull::Up);
 
-    let spi = Spi::new(spi2, 10.kHz(), esp_hal::spi::SpiMode::Mode0, clocks)
+    let spi = Spi::new(spi2, 2.MHz(), esp_hal::spi::SpiMode::Mode0, clocks)
         .with_sck(pin_spi_sck)
         .with_miso(pin_spi_miso)
         .with_mosi(pin_spi_mosi);
@@ -189,13 +197,6 @@ async fn main(low_prio_spawner: Spawner) {
     epd.clear_frame(&mut spi, &mut delay).unwrap();
     epd.display_frame(&mut spi, &mut delay).unwrap();
 
-    epd.clear_frame(&mut spi, &mut delay).unwrap();
-    epd.display_frame(&mut spi, &mut delay).unwrap();
-    epd.clear_frame(&mut spi, &mut delay).unwrap();
-    epd.display_frame(&mut spi, &mut delay).unwrap();
-    epd.clear_frame(&mut spi, &mut delay).unwrap();
-    epd.display_frame(&mut spi, &mut delay).unwrap();
-
     let style = MonoTextStyleBuilder::new()
         .font(&embedded_graphics::mono_font::ascii::FONT_7X14_BOLD)
         .text_color(Color::White)
@@ -211,7 +212,7 @@ async fn main(low_prio_spawner: Spawner) {
             .into_styled(PrimitiveStyle::with_fill(Color::Black))
             .draw(&mut display);
 
-        let _ = Text::new("FUCK", Point::new(100, 100), style).draw(&mut display);
+        let _ = Text::new("FUCK", Point::new(87, 105), style).draw(&mut display);
 
         display
     };
@@ -295,14 +296,14 @@ async fn handle_buttons(
     let mut battery = watchy_rs::BatteryStatusDriver::new(stat, adc);
 
     defmt::info!("getting battery status");
-    let status = battery.status().unwrap();
+    let status = battery.status().await.unwrap();
     defmt::info!("status: {:?}", status.voltage());
 
     let mut is_charging = false;
 
     let drive_accel = async {
         loop {
-            interrupt.wait_for_any_edge().await;
+            interrupt.wait_for_any_edge().await.unwrap();
             defmt::info!("TAP")
         }
     };
@@ -368,28 +369,4 @@ async fn handle_buttons(
     };
 
     embassy_futures::join::join3(drive_vibro, drive_buttons, drive_accel).await;
-}
-
-/// Simulates some blocking (badly behaving) task.
-#[embassy_executor::task]
-async fn update_display() {
-    defmt::info!("Starting low-priority task that isn't actually async");
-    loop {
-        defmt::info!("Doing some long and complicated calculation");
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(5) {}
-        defmt::info!("Calculation finished");
-        Timer::after(Duration::from_secs(5)).await;
-    }
-}
-
-/// A well-behaved, but starved async task.
-#[embassy_executor::task]
-async fn low_prio_async() {
-    defmt::info!("Starting low-priority task that will not be able to run while the blocking task is running");
-    let mut ticker = Ticker::every(Duration::from_secs(1));
-    loop {
-        defmt::info!("Low priority ticks");
-        ticker.next().await;
-    }
 }

@@ -1,9 +1,16 @@
 #![no_std]
+#![feature(error_in_core)]
+#![feature(type_alias_impl_trait)]
 
 use defmt::write;
 use esp_hal::{peripherals::LPWR, reset::SleepSource};
 
 mod battery;
+mod dns;
+mod throttle;
+mod wifi;
+
+pub use wifi::wifi;
 
 pub use battery::{BatteryStatus, BatteryStatusDriver};
 

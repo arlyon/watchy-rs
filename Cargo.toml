@@ -21,15 +21,21 @@ harness = false
 opt-level = "s"
 lto = "thin"
 debug = true    # does not get flashed
+codegen-units = 1
+panic = "abort"
 
 [dependencies]
 epd-waveshare = { git = "https://github.com/caemor/epd-waveshare.git" }
 embedded-graphics = "0.8.1"
 embassy-executor = { version = "0.5.0", features = ["nightly"] }
-esp-hal = { version = "0.19.0", features = ["async", "defmt", "esp32s3"] }
+esp-hal = { version = "0.19.0", default-features = false, features = [
+    "async",
+    "defmt",
+    "esp32s3",
+] }
 esp-hal-embassy = { version = "0.2.0", features = ["esp32s3"] }
 embassy-sync = "0.6.0"
-static_cell = "2.1.0"
+static_cell = { version = "2.1.0", features = ["nightly"] }
 embassy-time = { version = "0.3.2", features = ["generic-queue"] }
 embassy-embedded-hal = "0.2.0"
 esp-backtrace = { version = "0.13.0", features = [
@@ -54,3 +60,37 @@ futures = { version = "0.3.30", default-features = false, features = [
     "async-await",
 ] }
 pin-project-lite = "0.2.14"
+embedded-nal-async = "0.7.1"
+esp-wifi = { version = "0.7.1", default-features = false, features = [
+    "esp32s3",
+    "wifi",
+    "embassy-net",
+    "defmt",
+    "utils",
+    "smoltcp",
+    "ipv4",
+] }
+reqwless = { version = "0.12.1", default-features = false, features = [
+    "defmt",
+] }
+heapless = { version = "0.8.0", features = ["defmt-03"] }
+embedded-svc = { version = "0.28.0", default-features = false, features = [
+    "nightly",
+] }
+embassy-net = { version = "0.4.0", features = [
+    "tcp",
+    "dhcpv4",
+    "medium-ethernet",
+    "dns",
+    "defmt",
+] }
+pin-utils = "0.1.0"
+esp-wifi-sys = "0.4.0"
+
+[patch.crates-io]
+embassy-net = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+embassy-net-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+embassy-time-queue-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+esp-wifi-sys = { path = "../esp-wifi-sys/esp-wifi-sys" }
