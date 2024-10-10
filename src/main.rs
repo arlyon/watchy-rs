@@ -7,34 +7,33 @@
 extern crate alloc;
 
 use esp_backtrace as _;
-use esp_hal::interrupt::software::SoftwareInterruptControl;
-use esp_hal::peripheral::Peripheral;
-use esp_hal::reset::get_reset_reason;
-use esp_hal::rtc_cntl::sleep::{RtcioWakeupSource, WakeupLevel};
 use esp_println as _;
 
-use esp_hal::{prelude::*, Cpu};
-
 use async_debounce::Debouncer;
-use bma423::{Bma423, FeatureInterruptStatus, InterruptDirection, PowerControlFlag, Uninitialized};
+use bma423::{
+    Bma423, Error, FeatureInterruptStatus, InterruptDirection, PowerControlFlag, Uninitialized,
+};
 use core::future;
 use embassy_executor::Spawner;
 use embassy_futures::select::{Either, Either4};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::{Duration, Timer};
+use embedded_hal::i2c::ErrorType;
 use embedded_hal_async::digital::Wait;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{ErasedPin, GpioPin, Input, Io, Level, Output, Pull};
 use esp_hal::i2c::I2C;
+use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::interrupt::Priority;
 use esp_hal::peripherals::I2C0;
-use esp_hal::rtc_cntl::{Rtc, SocResetReason};
+use esp_hal::rtc_cntl::Rtc;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::timer::{ErasedTimer, OneShotTimer, PeriodicTimer};
-use esp_hal::Blocking;
+use esp_hal::{prelude::*, Blocking};
 use esp_hal_embassy::InterruptExecutor;
 use static_cell::StaticCell;
+
 use watchy_rs::GlobalTime;
 
 static TIMERS: StaticCell<[OneShotTimer<ErasedTimer>; 1]> = StaticCell::new();
@@ -128,27 +127,25 @@ async fn main(low_prio_spawner: Spawner) {
         io.pins.gpio35,
         io.pins.gpio36,
         global_time,
-        delay,
         io.pins.gpio9,
         io.pins.gpio10,
         peripherals.ADC1,
         peripherals.DMA,
     ));
 
-    // {
-    //     let i2c = I2C_G.init(peripherals.I2C0);
-    //     let i2c0 = I2C::new(i2c, io.pins.gpio12, io.pins.gpio11, 400.kHz(), clocks, None);
-    //     let accel = Bma423::new(
-    //         i2c0,
-    //         bma423::Config {
-    //             bandwidth: bma423::AccelConfigBandwidth::CicAvg8,
-    //             range: bma423::AccelRange::Range2g,
-    //             performance_mode: bma423::AccelConfigPerfMode::CicAvg,
-    //             sample_rate: bma423::AccelConfigOdr::Odr100,
-    //         },
-    //     );
-    //     low_prio_spawner.must_spawn(handle_accel(accel, delay));
-    // }
+    {
+        let i2c0 = I2C::new(peripherals.I2C0, io.pins.gpio12, io.pins.gpio11, 400.kHz());
+        let accel = Bma423::new(
+            i2c0,
+            bma423::Config {
+                bandwidth: bma423::AccelConfigBandwidth::CicAvg8,
+                range: bma423::AccelRange::Range2g,
+                performance_mode: bma423::AccelConfigPerfMode::CicAvg,
+                sample_rate: bma423::AccelConfigOdr::Odr100,
+            },
+        );
+        low_prio_spawner.must_spawn(handle_accel(accel, delay));
+    }
 
     let time = watchy_rs::get_time().await;
     if let Some(time) = time {
@@ -168,23 +165,23 @@ async fn handle_accel(
     accel: Bma423<I2C<'static, I2C0, Blocking>, Uninitialized>,
     mut delay: Delay,
 ) {
-    let mut accel = accel.init(&mut delay).unwrap();
+    let mut accel = accel.init(&mut delay).expect("failed to init accel");
     accel
         .set_power_control(PowerControlFlag::Auxiliary)
-        .unwrap();
+        .expect("failed to set power");
 
     accel
         .set_interrupt_config(
             bma423::InterruptLine::Line1,
             InterruptDirection::Input(bma423::InterruptTriggerCondition::Edge),
         )
-        .unwrap();
+        .expect("failed to set interrupt config");
 
-    let mut features = accel.edit_features().unwrap();
+    let mut features = accel.edit_features().expect("failed to edit features");
     features
         .set_tap_config(bma423::features::TapFeature::SingleTap, 3, true)
-        .unwrap();
-    features.write().unwrap();
+        .expect("failed to set tap config");
+    features.write().expect("failed to write features");
 
     accel
         .map_feature_interrupt(
@@ -192,15 +189,36 @@ async fn handle_accel(
             FeatureInterruptStatus::SingleTap,
             true,
         )
-        .unwrap();
+        .expect("failed to set feature interrupt");
 
     loop {
         // -z is face up
         // +x is vertical
         // +y is rotated left
-        let (x, y, z) = accel.accel_norm_int().unwrap();
-        defmt::info!("ACCEL: x: {} y: {} z: {}", x, y, z);
+        match accel.accel_norm_int() {
+            Ok((x, y, z)) => {
+                defmt::info!("ACCEL: x: {} y: {} z: {}", x, y, z);
+            }
+            Err(e) => print_accel_error(e),
+        }
         Timer::after(Duration::from_millis(1000 * 60 * 60)).await;
+    }
+}
+
+fn print_accel_error(e: Error<<I2C<'static, I2C0, Blocking> as ErrorType>::Error>) {
+    match e {
+        Error::BadArgument => {
+            defmt::info!("ACCEL: bad argument");
+        }
+        Error::ConfigError => {
+            defmt::info!("ACCEL: config error");
+        }
+        Error::BadInternal(code) => {
+            defmt::info!("ACCEL: internal error {:?}", code);
+        }
+        Error::BusError(e) => {
+            defmt::info!("ACCEL: bus error {:?}", e);
+        }
     }
 }
 

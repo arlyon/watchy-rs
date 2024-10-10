@@ -2,7 +2,7 @@
 
 use esp_hal::{
     analog::adc::{Adc, AdcCalLine, AdcConfig, Attenuation},
-    gpio::{ErasedPin, GpioPin, Input, Level, Pull},
+    gpio::GpioPin,
     peripherals::ADC1,
     prelude::nb,
 };

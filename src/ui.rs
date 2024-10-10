@@ -9,7 +9,6 @@ use esp_hal::{
 };
 use futures::{pin_mut, StreamExt};
 
-use core::cell::RefCell;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use epd_waveshare_async::{
@@ -17,7 +16,6 @@ use epd_waveshare_async::{
     prelude::*,
 };
 use esp_hal::{
-    delay::Delay,
     gpio::{Input, Level, Output, Pull},
     peripherals::SPI2,
     spi::master::Spi,
@@ -41,7 +39,6 @@ pub async fn drive_display(
     reset: GpioPin<35>,
     busy: GpioPin<36>,
     global_time: GlobalTime,
-    mut delay: Delay,
     battery_adc: GpioPin<9>,
     charge_pin: GpioPin<10>,
     adc: ADC1,
