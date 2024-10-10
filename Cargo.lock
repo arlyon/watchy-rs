@@ -853,13 +853,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "epd-waveshare"
+name = "epd-waveshare-async"
 version = "0.5.0"
-source = "git+https://github.com/caemor/epd-waveshare.git#1244f03591bcc5f001b6e634170eb99e29e768d0"
+source = "git+https://github.com/arlyon/epd-waveshare.git?branch=arlyon/more-fix-compile#40af1a66eb13d207d5e744af53faf57d8c45be4f"
 dependencies = [
  "bit_field",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
 ]
 
 [[package]]
@@ -2294,7 +2295,7 @@ dependencies = [
  "embedded-nal-async",
  "embedded-svc",
  "embedded-test",
- "epd-waveshare",
+ "epd-waveshare-async",
  "esp-alloc",
  "esp-backtrace",
  "esp-hal",

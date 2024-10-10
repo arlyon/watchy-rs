@@ -8,9 +8,12 @@ extern crate alloc;
 
 use esp_backtrace as _;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
+use esp_hal::peripheral::Peripheral;
+use esp_hal::reset::get_reset_reason;
+use esp_hal::rtc_cntl::sleep::{RtcioWakeupSource, WakeupLevel};
 use esp_println as _;
 
-use esp_hal::prelude::*;
+use esp_hal::{prelude::*, Cpu};
 
 use async_debounce::Debouncer;
 use bma423::{Bma423, FeatureInterruptStatus, InterruptDirection, PowerControlFlag, Uninitialized};
@@ -26,7 +29,7 @@ use esp_hal::gpio::{ErasedPin, GpioPin, Input, Io, Level, Output, Pull};
 use esp_hal::i2c::I2C;
 use esp_hal::interrupt::Priority;
 use esp_hal::peripherals::I2C0;
-use esp_hal::rtc_cntl::Rtc;
+use esp_hal::rtc_cntl::{Rtc, SocResetReason};
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::timer::{ErasedTimer, OneShotTimer, PeriodicTimer};
 use esp_hal::Blocking;
@@ -60,6 +63,12 @@ async fn main(low_prio_spawner: Spawner) {
 
     let delay = Delay::new();
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
+
+    // let wakeup_pins = &mut [(&mut io.pins.gpio7.into_ref(), WakeupLevel::Low)];
+    // let rtcio = RtcioWakeupSource::new(wakeup_pins);
+    defmt::info!("sleeping");
+    // rtc.sleep_light(&[&rtcio]);
+    defmt::info!("waking up");
 
     let embassy_timers = {
         let timg0 = TimerGroup::new(peripherals.TIMG0);
@@ -123,6 +132,7 @@ async fn main(low_prio_spawner: Spawner) {
         io.pins.gpio9,
         io.pins.gpio10,
         peripherals.ADC1,
+        peripherals.DMA,
     ));
 
     // {
