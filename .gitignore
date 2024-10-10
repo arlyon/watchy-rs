@@ -3,3 +3,4 @@
 /target
 .idea
 wifi-password.txt
+rust-toolchain.toml

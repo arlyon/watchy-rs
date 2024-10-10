@@ -19,8 +19,30 @@ sleep when it is idle. As of now, battery life is
 in the 4 hour range, but that is only because we
 do not use the deep or light sleep modes.
 
-Energy consumption is roughtly 50Ma, but is expected
+Energy consumption is roughtly 40Ma, but is expected
 to be closer to 1Ma average once full sleep works.
+
+## Getting Started
+
+The watchy is based on esp32s3 which uses xtensa's llvm
+fork. We use `mise` to manage all the toolchains and
+dependencies so this should be painless.
+
+This will install a rust toolchain, `espup`, `espflash`,
+and then install the xtenza toolchain.
+
+```
+mise install
+mise run init
+```
+
+This project is overrides the `run` command so after
+the dev enviroment is set up a simple `cargo run`
+should be enough.
+
+```
+cargo run --release
+```
 
 ## Roadmap
 
@@ -35,11 +57,13 @@ to be closer to 1Ma average once full sleep works.
 - [ ] Light sleep between updates
 - [ ] Deep sleep between updates
 
-# tests
+## Testing
+
+This is in progress, based on `hil-test`.
 
 See https://github.com/esp-rs/esp-hal/tree/main/hil-test
 
-# face inspo
+## Inspirations / Bookmarks
 
 - https://github.com/Prokuon/watchy-starfield
 - https://github.com/sqfmi/watchy-pipboy
