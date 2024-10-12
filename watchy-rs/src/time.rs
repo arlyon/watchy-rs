@@ -5,7 +5,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embedded_nal_async::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use esp_hal::rtc_cntl::Rtc;
 
-use crate::sticky_signal::StickySignal;
+use sticky_signal::StickySignal;
 use esp_wifi::wifi::ipv4::ToSocketAddrs;
 
 use futures::Stream;

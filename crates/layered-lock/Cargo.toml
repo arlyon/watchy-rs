@@ -1,0 +1,13 @@
+[package]
+name = "layered-lock"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+heapless = "0.8.0"
+
+[dev-dependencies]
+async-lock = "3.4.0"
+insta = "1.40.0"
+smol = "2.0.2"
+test-case = "3.3.1"

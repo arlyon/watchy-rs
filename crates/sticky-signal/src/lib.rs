@@ -1,3 +1,5 @@
+#![no_std]
+
 use core::cell::RefCell;
 use core::future::Future;
 use core::sync::atomic::{AtomicU16, Ordering};
@@ -34,17 +36,18 @@ impl<T, const WAKERS: usize> State<T, WAKERS> {
 /// StickySignals are generally declared as `static`s and then borrowed as required.
 ///
 /// ```
-/// use embassy_sync::signal::StickySignal;
-/// use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+/// # use static_cell::StaticCell;
+/// # use sticky_signal::StickySignal;
+/// # use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 ///
 /// enum SomeCommand {
 ///   On,
 ///   Off,
 /// }
 ///
-/// static SOME_STICKY_SIGNAL: StickySignal<CriticalSectionRawMutex, SomeCommand> = StickySignal::new();
-/// # or, if you don't need to share the signal between threads
-/// static SINGLE_THREAD_STICKY_SIGNAL: StaticCell<StickySignal<NoopRawMutex, SomeCommand>> = StaticCell::new();
+/// static SOME_STICKY_SIGNAL: StickySignal<CriticalSectionRawMutex, SomeCommand, 10> = StickySignal::new();
+/// // or, if you don't need to share the signal between threads
+/// static SINGLE_THREAD_STICKY_SIGNAL: StaticCell<StickySignal<NoopRawMutex, SomeCommand, 10>> = StaticCell::new();
 /// ```
 pub struct StickySignal<M, T, const WAKERS: usize>
 where
@@ -244,3 +247,6 @@ impl<'a, M: RawMutex, T: Clone + Send, const WAKERS: usize> Future for Waiter<'a
         self.signal.poll_wait(self.name, self.id, cx)
     }
 }
+
+#[cfg(test)]
+mod test {}

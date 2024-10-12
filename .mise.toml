@@ -2,6 +2,7 @@
 "rust" = "1.80.0"
 "cargo:espup" = "0.12.2"
 "cargo:espflash" = "3.1.1"
+"cargo:cargo-groups" = "0.1.9"
 
 [tasks.init]
 # chicken and egg thing, can't set the esp toolchain until after espup

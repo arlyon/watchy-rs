@@ -9,7 +9,6 @@ use esp_hal::{peripherals::LPWR, reset::SleepSource};
 mod battery;
 mod dns;
 mod fonts;
-pub mod sticky_signal;
 mod throttle;
 mod time;
 mod ui;

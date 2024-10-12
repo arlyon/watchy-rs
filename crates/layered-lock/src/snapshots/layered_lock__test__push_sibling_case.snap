@@ -1,0 +1,18 @@
+---
+source: crates/layered_lock/src/lib.rs
+expression: lock
+---
+LayeredLock {
+    locks: [
+        Mutex {
+            data: false,
+        },
+        Mutex {
+            data: false,
+        },
+    ],
+    dependencies: [
+        1,
+        0,
+    ],
+}

@@ -1,0 +1,12 @@
+[package]
+name = "sticky-signal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+defmt = "0.3.8"
+embassy-sync = "0.6.0"
+heapless = "0.8.0"
+
+[dev-dependencies]
+static_cell = "2.1.0"

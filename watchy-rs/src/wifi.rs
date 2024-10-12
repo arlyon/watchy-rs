@@ -12,7 +12,6 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
-use esp_backtrace as _;
 use esp_hal::peripherals::RADIO_CLK;
 use esp_hal::peripherals::{RNG, WIFI};
 use esp_hal::rng::Rng;
@@ -28,7 +27,7 @@ use esp_wifi::{
 use sntpc::NtpResult;
 use static_cell::StaticCell;
 
-use crate::sticky_signal::StickySignal;
+use sticky_signal::StickySignal;
 
 pub enum MessageType {
     TimeUpdate(&'static Signal<CriticalSectionRawMutex, TimeResponse>),
