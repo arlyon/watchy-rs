@@ -2400,7 +2400,7 @@ dependencies = [
  "defmt",
  "embassy-sync 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "heapless 0.8.0",
- "static_cell",
+ "smol",
 ]
 
 [[package]]

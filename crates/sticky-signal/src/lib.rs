@@ -1,4 +1,5 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
+#![feature(future_join)]
 
 use core::cell::RefCell;
 use core::future::Future;
@@ -95,7 +96,7 @@ where
             );
 
             // swamp remove is faster than retain
-            if let Some((idx, _)) = cell.waiters.iter().enumerate().find(|(_, (i, _))| *i != id) {
+            if let Some((idx, _)) = cell.waiters.iter().enumerate().find(|(_, (i, _))| *i == id) {
                 cell.waiters.swap_remove(idx);
             }
         })
@@ -249,4 +250,105 @@ impl<'a, M: RawMutex, T: Clone + Send, const WAKERS: usize> Future for Waiter<'a
 }
 
 #[cfg(test)]
-mod test {}
+mod test {
+    use core::future::join;
+    use embassy_sync::blocking_mutex::raw::RawMutex;
+    use smol::block_on;
+    use std::sync::Mutex;
+
+    struct TestMutex(Mutex<()>);
+    unsafe impl RawMutex for TestMutex {
+        const INIT: Self = TestMutex(std::sync::Mutex::new(()));
+
+        fn lock<R>(&self, f: impl FnOnce() -> R) -> R {
+            let _lock = self.0.lock();
+            f()
+        }
+    }
+
+    #[test]
+    fn base_case() {
+        let signal = super::StickySignal::<TestMutex, bool, 5>::new();
+
+        let (a, _) = block_on(join!(signal.wait("a"), async { signal.signal(true) }));
+
+        assert_eq!(a, true)
+    }
+
+    #[test]
+    fn multiple_listeners() {
+        let signal = super::StickySignal::<TestMutex, bool, 5>::new();
+
+        let (a, b, _) = block_on(join!(signal.wait("a"), signal.wait("b"), async {
+            signal.signal(true)
+        }));
+
+        assert_eq!(a, true);
+        assert_eq!(b, true);
+    }
+
+    /// ensure that waker slots are cleared when the futures are dropped
+    #[test]
+    fn drop_waker() {
+        let signal = super::StickySignal::<TestMutex, bool, 2>::new();
+        drop(signal.wait("a"));
+        drop(signal.wait("b"));
+        drop(signal.wait("c"));
+
+        let (d, _) = block_on(join!(signal.wait("d"), async { signal.signal(true) }));
+
+        assert_eq!(d, true);
+    }
+
+    #[test]
+    fn wait_for_single_waiter() {
+        let signal = super::StickySignal::<TestMutex, u8, 5>::new();
+        let (a, _) = block_on(join!(
+            signal.wait_for("a", |v| if v == 3 { Some(v) } else { None }),
+            async {
+                signal.signal(1);
+                signal.signal(2);
+                signal.signal(3);
+            }
+        ));
+
+        assert_eq!(a, 3);
+    }
+
+    #[test]
+    fn wait_for_multiple_concurrent_waiters() {
+        let signal = super::StickySignal::<TestMutex, bool, 5>::new();
+        let (a, b, _) = block_on(join!(
+            signal.wait_for("a", |v| if v { Some(v) } else { None }),
+            signal.wait_for("b", |v| if v { Some(v) } else { None }),
+            async {
+                signal.signal(false);
+                signal.signal(true);
+            }
+        ));
+
+        assert_eq!(a, true);
+        assert_eq!(b, true);
+    }
+
+    #[test]
+    fn try_take_with_reset() {
+        let signal = super::StickySignal::<TestMutex, bool, 5>::new();
+        signal.signal(true);
+        signal.reset();
+        let result = signal.try_take();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn wait_for_signal_twice() {
+        let signal = super::StickySignal::<TestMutex, bool, 5>::new();
+        signal.signal(true);
+        let first_peek = signal.peek();
+        assert_eq!(first_peek, Some(true));
+
+        signal.signal(false);
+        let second_peek = signal.peek();
+        assert_eq!(second_peek, Some(false));
+    }
+}

@@ -9,4 +9,4 @@ embassy-sync = "0.6.0"
 heapless = "0.8.0"
 
 [dev-dependencies]
-static_cell = "2.1.0"
+smol = "2.0.2"
