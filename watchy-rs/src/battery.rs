@@ -1,10 +1,10 @@
 //! Battery status using the ADC.
 
 use esp_hal::{
+    Blocking,
     analog::adc::{Adc, AdcCalLine, AdcConfig, Attenuation},
     gpio::GpioPin,
     peripherals::ADC1,
-    prelude::nb,
 };
 
 /// Represents a battery status.
@@ -37,7 +37,7 @@ pub struct BatteryStatusDriver<'d> {
     adc1_pin: esp_hal::analog::adc::AdcPin<esp_hal::gpio::GpioPin<9>, ADC1, AdcCalLine<ADC1>>,
     chrg_pin: esp_hal::analog::adc::AdcPin<esp_hal::gpio::GpioPin<10>, ADC1, AdcCalLine<ADC1>>,
     // chrg_pin: Input<'d, ErasedPin>,
-    adc1: Adc<'d, ADC1>,
+    adc1: Adc<'d, ADC1, Blocking>,
 }
 impl<'d> BatteryStatusDriver<'d> {
     /// Setup a new battery status driver.
@@ -56,14 +56,10 @@ impl<'d> BatteryStatusDriver<'d> {
     ) -> Self {
         // Create ADC instances
         let mut adc1_config = AdcConfig::new();
-        let adc1_pin = adc1_config.enable_pin_with_cal::<GpioPin<9>, AdcCalLine<ADC1>>(
-            battery_pin,
-            Attenuation::Attenuation11dB,
-        );
-        let chrg_pin = adc1_config.enable_pin_with_cal::<GpioPin<10>, AdcCalLine<ADC1>>(
-            chrg_pin,
-            Attenuation::Attenuation11dB,
-        );
+        let adc1_pin = adc1_config
+            .enable_pin_with_cal::<GpioPin<9>, AdcCalLine<ADC1>>(battery_pin, Attenuation::_11dB);
+        let chrg_pin = adc1_config
+            .enable_pin_with_cal::<GpioPin<10>, AdcCalLine<ADC1>>(chrg_pin, Attenuation::_11dB);
         let adc1 = Adc::new(adc, adc1_config);
 
         // let chrg_pin = Input::new(chrg_pin, Pull::Up);
@@ -77,63 +73,31 @@ impl<'d> BatteryStatusDriver<'d> {
 
     /// Retrieve the battery status by sampling the ADC.
     pub async fn status(&mut self) -> Result<BatteryStatus, ()> {
-        let Ok(voltage) = crate::block_embassy!(self.adc1.read_oneshot(&mut self.adc1_pin)) else {
-            return Err(());
-        };
+        loop {
+            let Ok(voltage) = self.adc1.read_oneshot(&mut self.chrg_pin) else {
+                embassy_futures::yield_now().await;
+                continue;
+            };
 
-        // adjust voltage based on the algo in the watchy firmware
-        let voltage = voltage as f32 * ((360.0 + 100.0) / 360.0);
-        let voltage = voltage as u32;
+            // adjust voltage based on the algo in the watchy firmware
+            let voltage = voltage as f32 * ((360.0 + 100.0) / 360.0);
+            let voltage = voltage as u32;
 
-        Ok(BatteryStatus(voltage))
+            return Ok(BatteryStatus(voltage));
+        }
     }
 
     /// The battery is charging if the charge pin is low.
     pub async fn charging(&mut self) -> bool {
-        // let level = self.chrg_pin.get_level();
-        // defmt::info!("reading charge pin {:?}", level);
-        // level
-
-        let Ok(voltage) = crate::block_embassy!(self.adc1.read_oneshot(&mut self.chrg_pin)) else {
-            return false;
-        };
-
-        // over 3000 is charging
-        voltage > 3000
-    }
-}
-
-/// Turns the non-blocking expression `$e` into a blocking operation.
-///
-/// This is accomplished by continuously calling the expression `$e` until it no
-/// longer returns `Error::WouldBlock`
-///
-/// # Input
-///
-/// An expression `$e` that evaluates to `nb::Result<T, E>`
-///
-/// # Output
-///
-/// - `Ok(t)` if `$e` evaluates to `Ok(t)`
-/// - `Err(e)` if `$e` evaluates to `Err(nb::Error::Other(e))`
-#[macro_export]
-macro_rules! block_embassy {
-    ($e:expr) => {
         loop {
-            #[allow(unreachable_patterns)]
-            match $e {
-                Err(nb::Error::Other(e)) =>
-                {
-                    #[allow(unreachable_code)]
-                    break Err(e)
-                }
-                Err(nb::Error::WouldBlock) => {
-                    embassy_futures::yield_now().await;
-                }
-                Ok(x) => break Ok(x),
-            }
+            let Ok(voltage) = self.adc1.read_oneshot(&mut self.chrg_pin) else {
+                embassy_futures::yield_now().await;
+                continue;
+            };
+
+            return voltage > 3000;
         }
-    };
+    }
 }
 
 // TODO figure this out

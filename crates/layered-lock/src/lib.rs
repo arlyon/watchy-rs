@@ -1,4 +1,5 @@
 #![cfg_attr(not(test), no_std)]
+#![feature(future_join)]
 
 //! layered_lock
 //!
@@ -11,7 +12,7 @@
 //! choose to prevent its leaf nodes from being opened, to model a
 //! graceful shutdown.
 
-use core::{marker::PhantomData, num::NonZeroUsize};
+use core::{future::Future, marker::PhantomData, num::NonZeroUsize};
 
 pub trait AsyncMutex<T> {
     type Locked<'a>
@@ -62,30 +63,52 @@ impl<const L: usize, const C: usize, M: AsyncMutex<bool>> LayeredLock<L, C, M> {
     }
 
     /// produce a sibling leaf with a path just one off
-    pub fn push_sibling(&mut self, mut leaf: Leaf<C, Open>) -> (Leaf<C, Fused>, Leaf<C, Open>) {
+    ///
+    /// panics if leaf is not a child of relative_to
+    pub fn push_sibling(
+        &mut self,
+        mut leaf: Leaf<C, Open>,
+        relative_to: Option<&Layer<C>>,
+    ) -> (Leaf<C, Fused>, Leaf<C, Open>) {
         // push a new lock to the front
         self.locks
             .insert(0, M::new(false))
             .unwrap_or_else(|_| panic!());
-        let (current, _) = find_node(&self.dependencies, &leaf.path).unwrap();
-        let parent = current + self.dependencies[current] + 1;
-        self.dependencies.insert(0, parent).unwrap();
 
-        let mut orig = Leaf {
-            path: leaf.path.clone(),
-            _data: PhantomData,
+        fn subset(a: &[usize], b: &[usize]) -> bool {
+            a.iter().zip(b.iter()).all(|(a, b)| a == b)
+        }
+
+        let new_path = {
+            let path = match relative_to {
+                Some(layer)
+                    if layer.path.len() <= leaf.path.len() && subset(&layer.path, &leaf.path) =>
+                {
+                    &layer.path
+                }
+                Some(layer) => panic!("leaf is not a child of relative_to"),
+                None => &leaf.path,
+            };
+
+            let (current, _) = find_node(&self.dependencies, &path).unwrap();
+            let parent = current + self.dependencies[current] + 1;
+            self.dependencies.insert(0, parent).unwrap();
+
+            let last_elem = path.len() - 1;
+            let mut new_path = path.clone();
+            *new_path
+                .get_mut(last_elem)
+                .expect("there is always 1 item in the path") += 1;
+            new_path
         };
 
-        let index = leaf.path.len() - 1;
-        *leaf
-            .path
-            .get_mut(index)
-            .expect("there is always 1 item in the path") += 1;
-
         (
-            orig,
             Leaf {
                 path: leaf.path,
+                _data: PhantomData,
+            },
+            Leaf {
+                path: new_path,
                 _data: PhantomData,
             },
         )
@@ -108,6 +131,22 @@ impl<const L: usize, const C: usize, M: AsyncMutex<bool>> LayeredLock<L, C, M> {
                 _data: PhantomData,
             },
         )
+    }
+
+    pub fn child_locks(&self, layer: &Layer<C>) -> &[M] {
+        let target = find_node(&self.dependencies, &layer.path).unwrap().0;
+        let pointers = &self.dependencies[..target];
+        for (id, val) in pointers.iter().enumerate() {
+            if *val > 0 {
+                #[cfg(test)]
+                println!("leaf node at {}", self.dependencies.len() - target - id);
+            }
+            if *val > id {
+                break; // moved on to the next sibling
+            }
+        }
+
+        &[]
     }
 }
 
@@ -178,22 +217,39 @@ pub struct Layer<const C: usize> {
     path: heapless::Vec<usize, C>,
 }
 
+impl<const C: usize> Layer<C> {
+    /// wait for child locks to be released and prevent them from
+    /// being acquired until the lock is released
+    pub async fn lock<const L: usize, M: AsyncMutex<bool>>(&self, ll: &LayeredLock<L, C, M>) {
+        let (idx, _skipped) = find_node(&ll.dependencies, &self.path).unwrap();
+    }
+
+    pub fn try_lock<const L: usize, M: AsyncMutex<bool>>(&self, ll: &LayeredLock<L, C, M>) {
+        // self.lock().now_or_never()
+    }
+}
+
 /// A leaf node in the layered lock, identified by walking from the end
 /// of the vector taking the nth child at each step.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Leaf<const C: usize, State> {
     path: heapless::Vec<usize, C>,
     _data: PhantomData<State>,
 }
 
 /// no more siblings can be produced for this leaf
+#[derive(Debug)]
 pub struct Fused;
 /// siblings can be produced for this leaf
+#[derive(Debug)]
 pub struct Open;
 
 #[cfg(test)]
 mod test {
+    use core::future::join;
+
     use super::*;
+    use smol::block_on;
     use test_case::test_case;
 
     impl<T> AsyncMutex<T> for smol::lock::Mutex<T> {
@@ -234,7 +290,7 @@ mod test {
     #[test]
     fn example() {
         let (mut lock, leaf) = LayeredLock::<2, 4, smol::lock::Mutex<bool>>::new();
-        let (_, leaf) = lock.push_sibling(leaf);
+        let (_, leaf) = lock.push_sibling(leaf, None);
         let (layer, leaf) = lock.push_child(leaf);
         let (layer, leaf) = lock.push_child(leaf);
         println!("{:?}", lock);
@@ -242,9 +298,32 @@ mod test {
     }
 
     #[test]
+    fn child_locks() {
+        let (mut lock, leaf) = LayeredLock::<2, 4, smol::lock::Mutex<bool>>::new();
+        let (layer, leaf) = lock.push_sibling(leaf, None);
+        let (layer, leaf) = lock.push_child(leaf);
+        let (layer, leaf) = lock.push_child(leaf);
+
+        lock.child_locks(&layer);
+    }
+
+    /// expected shape
+    ///   /- o2 -- o3
+    /// r -- o0 -- o1
+    #[test]
+    fn layer_sibling() {
+        let (mut lock, leaf) = LayeredLock::<3, 4, smol::lock::Mutex<bool>>::new(); // o0
+        let (layer, leaf) = lock.push_child(leaf); // o1
+        let (_a, leaf) = lock.push_sibling(leaf, Some(&layer)); // o2
+        let (layer, leaf) = lock.push_child(leaf); // o3
+
+        insta::assert_debug_snapshot!(lock);
+    }
+
+    #[test]
     fn example2() {
         let (mut lock, leaf) = LayeredLock::<2, 4, smol::lock::Mutex<bool>>::new();
-        let (_, leaf) = lock.push_sibling(leaf);
+        let (_, leaf) = lock.push_sibling(leaf, None);
         println!("{:?}", lock);
         assert_eq!(Some(1), find_lock_idx(&lock.dependencies, &leaf.path));
     }
@@ -252,7 +331,7 @@ mod test {
     fn example3() {
         let (mut lock, leaf) = LayeredLock::<2, 4, smol::lock::Mutex<bool>>::new();
         let (_, leaf) = lock.push_child(leaf);
-        let (fused, leaf) = lock.push_sibling(leaf);
+        let (fused, leaf) = lock.push_sibling(leaf, None);
         let (_, leaf) = lock.push_child(leaf);
         println!("{:?}", lock);
         assert_eq!(Some(1), find_lock_idx(&lock.dependencies, &leaf.path));
@@ -275,7 +354,7 @@ mod test {
     #[test]
     fn push_sibling_case() {
         let (mut lock, leaf) = LayeredLock::<2, 2, smol::lock::Mutex<bool>>::new();
-        let (orig_leaf, new_leaf) = lock.push_sibling(leaf);
+        let (orig_leaf, new_leaf) = lock.push_sibling(leaf, None);
 
         // Make sure the original and new leaf are different
         assert_ne!(orig_leaf.path, new_leaf.path);
@@ -295,8 +374,8 @@ mod test {
     #[test]
     fn layered_lock_multiple_leaves() {
         let (mut lock, leaf1) = LayeredLock::<3, 3, smol::lock::Mutex<bool>>::new();
-        let (_, leaf2) = lock.push_sibling(leaf1);
-        let (_, leaf3) = lock.push_sibling(leaf2);
+        let (_, leaf2) = lock.push_sibling(leaf1, None);
+        let (_, leaf3) = lock.push_sibling(leaf2, None);
 
         // Ensure there are three unique leaves with distinct paths
         assert_eq!(lock.locks.len(), 3);
@@ -307,7 +386,7 @@ mod test {
     #[test]
     fn push_child_after_sibling() {
         let (mut lock, leaf1) = LayeredLock::<2, 3, smol::lock::Mutex<bool>>::new();
-        let (_, leaf2) = lock.push_sibling(leaf1);
+        let (_, leaf2) = lock.push_sibling(leaf1, None);
         println!("{:?}", lock);
         let (layer, child) = lock.push_child(leaf2);
         println!("{:?}", lock);
@@ -334,12 +413,20 @@ mod test {
         let (mut lock, leaf) = LayeredLock::<2, 3, smol::lock::Mutex<bool>>::new();
         let (layer, child) = lock.push_child(leaf);
         println!("{:?}", lock);
-        let (orig_leaf, sibling) = lock.push_sibling(child);
+        let (orig_leaf, sibling) = lock.push_sibling(child, None);
 
         // Ensure the sibling has the same path length as the original leaf
         assert_eq!(orig_leaf.path.len(), sibling.path.len());
         // Ensure the paths are distinct
         assert_ne!(orig_leaf.path, sibling.path);
         insta::assert_debug_snapshot!(lock);
+    }
+
+    #[test]
+    fn locking() {
+        let (mut lock, leaf) = LayeredLock::<2, 3, smol::lock::Mutex<bool>>::new();
+        let (layer, child) = lock.push_child(leaf);
+
+        let result = block_on(join!(layer.lock(&lock)));
     }
 }

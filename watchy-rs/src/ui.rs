@@ -1,17 +1,19 @@
+use embassy_time::Delay;
 use embedded_fonts::BdfTextStyle;
 use embedded_graphics::{mono_font::MonoTextStyleBuilder, prelude::*, text::Text};
 use esp_hal::{
-    dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf},
+    Config,
+    dma::{DmaChannel0, DmaPriority, DmaRxBuf, DmaTxBuf},
     dma_buffers,
-    gpio::GpioPin,
+    gpio::{GpioPin, InputConfig, OutputConfig},
     peripherals::{ADC1, DMA},
-    prelude::*,
+    time::Rate,
 };
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use epd_waveshare_async::{
+use epd_waveshare::{
     epd1in54_v2::{Display1in54, Epd1in54},
     prelude::*,
 };
@@ -42,26 +44,30 @@ pub async fn drive_display(
     battery_adc: GpioPin<9>,
     charge_pin: GpioPin<10>,
     adc: ADC1,
-    dma: DMA,
+    dma: DmaChannel0,
 ) {
-    let pin_spi_edp_cs = Output::new(cs, Level::Low);
-    let pin_edp_dc = Output::new(dc, Level::Low);
-    let pin_edp_reset = Output::new(reset, Level::Low);
-    let pin_edp_busy = Input::new(busy, Pull::Up);
-
-    let dma = Dma::new(dma);
-    let dma_channel = dma.channel0;
+    let pin_spi_edp_cs = Output::new(cs, Level::Low, OutputConfig::default());
+    let pin_edp_dc = Output::new(dc, Level::Low, OutputConfig::default());
+    let pin_edp_reset = Output::new(reset, Level::Low, OutputConfig::default());
+    let pin_edp_busy = Input::new(busy, InputConfig::default().with_pull(Pull::Up));
 
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
 
-    let spi = Spi::new(spi, 2.MHz(), esp_hal::spi::SpiMode::Mode0)
-        .with_sck(sck)
-        .with_miso(miso)
-        .with_mosi(mosi)
-        .with_dma(dma_channel.configure_for_async(false, DmaPriority::Priority0))
-        .with_buffers(dma_rx_buf, dma_tx_buf);
+    let spi = Spi::new(
+        spi,
+        esp_hal::spi::master::Config::default()
+            .with_frequency(Rate::from_mhz(2))
+            .with_mode(esp_hal::spi::Mode::_0),
+    )
+    .unwrap()
+    .into_async()
+    .with_sck(sck)
+    .with_miso(miso)
+    .with_mosi(mosi);
+    // .with_dma(dma)
+    // .with_buffers(dma_rx_buf, dma_tx_buf);
 
     let spi = Mutex::<CriticalSectionRawMutex, _>::new(spi);
     let mut spi = SpiDevice::new(&spi, pin_spi_edp_cs);
@@ -71,6 +77,7 @@ pub async fn drive_display(
         pin_edp_busy,
         pin_edp_dc,
         pin_edp_reset,
+        &mut Delay,
         Some(1_000),
     )
     .await
@@ -116,10 +123,10 @@ pub async fn drive_display(
                 date.minute()
             );
 
-            epd.wake_up(&mut spi).await.unwrap();
+            epd.wake_up(&mut spi, &mut Delay).await.unwrap();
 
             if let Some(lut) = lut {
-                epd.set_lut(&mut spi, Some(lut)).await.unwrap();
+                epd.set_lut(&mut spi, &mut Delay, Some(lut)).await.unwrap();
             };
 
             let style = BdfTextStyle::new(
@@ -181,17 +188,17 @@ pub async fn drive_display(
                 display
             };
 
-            epd.update_frame(&mut spi, display.buffer()).await.unwrap();
+            epd.update_frame(&mut spi, display.buffer(), &mut Delay)
+                .await
+                .unwrap();
 
             // Display updated frame
-            // epd.update_frame(&mut spi, display.buffer(), &mut delay)
-            //     .unwrap();
-            epd.display_frame(&mut spi).await.unwrap();
+            epd.display_frame(&mut spi, &mut Delay).await.unwrap();
 
             defmt::info!("sleeping display");
 
             // Set the EPD to sleep
-            epd.sleep(&mut spi).await.unwrap();
+            epd.sleep(&mut spi, &mut Delay).await.unwrap();
         }
     }
 }

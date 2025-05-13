@@ -5,28 +5,26 @@
 
 use core::str::FromStr;
 use embassy_executor::Spawner;
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{Either, select};
 use embassy_net::udp::PacketMetadata;
-use embassy_net::{Config, Stack, StackResources};
+use embassy_net::{Config, Runner, Stack, StackResources};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
+use embedded_svc::wifi;
 use esp_hal::peripherals::RADIO_CLK;
 use esp_hal::peripherals::{RNG, WIFI};
 use esp_hal::rng::Rng;
-use esp_hal::timer::{ErasedTimer, PeriodicTimer};
-use esp_wifi::{
-    initialize,
-    wifi::{
-        ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiStaDevice,
-        WifiState,
-    },
-    EspWifiInitFor,
+use esp_hal::timer::PeriodicTimer;
+use esp_hal::timer::timg::Timer as TimgTimer;
+use esp_wifi::EspWifiController;
+use esp_wifi::wifi::{
+    ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiState,
 };
 use sntpc::NtpResult;
-use static_cell::StaticCell;
 
+use static_cell::StaticCell;
 use sticky_signal::StickySignal;
 
 pub enum MessageType {
@@ -42,7 +40,7 @@ static NETWORK_BUS: Channel<CriticalSectionRawMutex, MessageType, 10> = Channel:
 static ENABLE_NETWORK: StickySignal<CriticalSectionRawMutex, bool, 4> =
     StickySignal::new_with_name("enable_network");
 
-static SSID: &str = "NOW1QQ9L";
+static SSID: &str = "CommunityFibre10Gb_B4C51";
 const PASSWORD: &str = include_str!("../wifi-password.txt");
 
 // new requests should just reuse existing values
@@ -72,33 +70,31 @@ pub async fn get_weather() -> WeatherResponse {
 }
 
 static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
-static WIFI_STACK: StaticCell<Stack<WifiDevice<'static, WifiStaDevice>>> = StaticCell::new();
+static WIFI_STACK: StaticCell<Stack> = StaticCell::new();
+static WIFI_CONTROLLER: StaticCell<EspWifiController<'static>> = StaticCell::new();
 
 #[embassy_executor::task]
 pub async fn wifi(
-    timer: PeriodicTimer<'static, ErasedTimer>,
+    timer: TimgTimer,
     rng: RNG,
     radio_clock_control: RADIO_CLK,
     wifi: WIFI,
     spawner: Spawner,
 ) {
-    let init = initialize(
-        EspWifiInitFor::Wifi,
-        timer,
-        Rng::new(rng),
-        radio_clock_control,
-    )
-    .unwrap();
+    let mut rng = Rng::new(rng);
 
-    let (wifi_interface, controller) =
-        esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
+    let esp_wifi_ctrl = WIFI_CONTROLLER
+        .init_with(|| esp_wifi::init(timer, rng.clone(), radio_clock_control).unwrap());
+
+    let (controller, interfaces) = esp_wifi::wifi::new(esp_wifi_ctrl, wifi).unwrap();
+    let wifi_interface = interfaces.sta;
 
     let config = Config::dhcpv4(Default::default());
 
-    let seed = 1234; // very random, very secure seed
+    let seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
     // Init network stack
-    let stack = Stack::new(
+    let (stack, runner) = embassy_net::new(
         wifi_interface,
         config,
         STACK_RESOURCES.init(StackResources::<3>::new()),
@@ -107,7 +103,7 @@ pub async fn wifi(
     let stack = WIFI_STACK.init(stack);
 
     spawner.spawn(connection(controller)).ok();
-    spawner.spawn(net_task(stack)).ok();
+    spawner.spawn(net_task(runner)).ok();
 
     loop {
         let msg = NETWORK_BUS.receive().await;
@@ -136,7 +132,7 @@ pub async fn wifi(
                 let mut tx_meta = [PacketMetadata::EMPTY; 16];
                 let mut tx_buffer = [0; 4096];
                 let mut socket = embassy_net::udp::UdpSocket::new(
-                    stack,
+                    *stack,
                     &mut rx_meta,
                     &mut rx_buffer,
                     &mut tx_meta,
@@ -165,7 +161,7 @@ async fn connection(mut controller: WifiController<'static>) {
     const MAX_CONNECT_FAILURES: usize = 3;
     loop {
         defmt::trace!("wifi loop");
-        if esp_wifi::wifi::get_wifi_state() == WifiState::StaConnected {
+        if esp_wifi::wifi::wifi_state() == WifiState::StaConnected {
             match select(
                 ENABLE_NETWORK.wait_for("wifi loop disabled", |val| (!val).then_some(false)),
                 controller.wait_for_event(WifiEvent::StaDisconnected),
@@ -175,7 +171,7 @@ async fn connection(mut controller: WifiController<'static>) {
                 // disconnect
                 Either::First(_) => {
                     defmt::info!("stopping wifi");
-                    controller.stop().await.unwrap();
+                    controller.stop().unwrap();
                 }
                 // we disconnected involuntarily, attempt to reconnect
                 Either::Second(_) => {
@@ -197,12 +193,12 @@ async fn connection(mut controller: WifiController<'static>) {
             });
             controller.set_configuration(&client_config).unwrap();
             defmt::info!("Starting wifi");
-            let data = controller.start().await;
+            let data = controller.start();
             defmt::info!("Wifi started! {:?}", data);
         }
         defmt::info!("About to connect...");
 
-        match controller.connect().await {
+        match controller.connect() {
             Ok(()) => defmt::info!("Wifi connected!"),
             Err(e) => {
                 defmt::info!("Failed to connect to wifi {:?}", e);
@@ -210,7 +206,7 @@ async fn connection(mut controller: WifiController<'static>) {
                 if connect_failures > MAX_CONNECT_FAILURES {
                     defmt::info!("Shutting down wifi");
                     ENABLE_NETWORK.signal(false);
-                    controller.stop().await.unwrap();
+                    controller.stop();
                     connect_failures = 0;
                 }
                 Timer::after(Duration::from_millis(5000)).await
@@ -220,7 +216,7 @@ async fn connection(mut controller: WifiController<'static>) {
 }
 
 #[embassy_executor::task]
-async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
+async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     // wait for network to be enabled, then select on it being disabled
 
     loop {
@@ -231,7 +227,7 @@ async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
         defmt::trace!("network enabled");
         match select(
             ENABLE_NETWORK.wait_for("net loop disabled", |val| (!val).then_some(false)),
-            stack.run(),
+            runner.run(),
         )
         .await
         {

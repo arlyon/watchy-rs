@@ -6,18 +6,26 @@ members = ["watchy-rs", "crates/*"]
 crates = ["path:crates/*"]
 bin = ["path:watchy-rs"]
 
-[patch.crates-io]
-embassy-net = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
-embassy-net-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
-embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
-embassy-time-queue-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+[workspace.dependencies]
+embassy-executor = { version = "0.7.0", features = ["nightly"] }
+embassy-sync = "0.6.2"
+defmt = "1"
+embedded-hal = "1"
+embedded-hal-async = "1"
+esp-hal = "1.0.0-beta.0"
 
-esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
-esp-wifi = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
-esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
-esp-alloc = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
-xtensa-lx-rt = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
+[patch.crates-io]
+# embassy-net = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+# embassy-net-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+# embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+# embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+# embassy-time-queue-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "44282b18faf77b7ff2fa521eb7995fa46ca16e01" }
+
+# esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
+# esp-wifi = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
+# esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
+# esp-alloc = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
+# xtensa-lx-rt = { git = "https://github.com/esp-rs/esp-hal.git", rev = "82a9abfff81d78e6342f952acc093043f32390c0" }
 
 # fork for updated embedded-graphics
 embedded-fonts = { git = "https://github.com/arlyon/embedded-fonts.git" }

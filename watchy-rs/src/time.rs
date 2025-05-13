@@ -1,12 +1,12 @@
+use core::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
+
 use chrono::{NaiveDateTime, Timelike};
 use embassy_futures::select;
-use embassy_net::{udp::UdpSocket, IpAddress};
+use embassy_net::{IpAddress, udp::UdpSocket};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embedded_nal_async::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use esp_hal::rtc_cntl::Rtc;
 
 use sticky_signal::StickySignal;
-use esp_wifi::wifi::ipv4::ToSocketAddrs;
 
 use futures::Stream;
 use sntpc::{NtpContext, NtpResult, NtpTimestampGenerator};
@@ -48,7 +48,9 @@ impl GlobalTime {
 
     /// Get the time based on the system time + offset
     pub fn get_time(&self) -> u64 {
-        let microseconds = esp_hal::time::now().duration_since_epoch().to_micros();
+        let microseconds = esp_hal::time::Instant::now()
+            .duration_since_epoch()
+            .as_micros();
 
         let offset = TIME_OFFSET.peek().unwrap_or_default();
 
@@ -86,7 +88,9 @@ struct StdTimestampGen {
 
 impl NtpTimestampGenerator for StdTimestampGen {
     fn init(&mut self) {
-        let microseconds = esp_hal::time::now().duration_since_epoch().to_micros();
+        let microseconds = esp_hal::time::Instant::now()
+            .duration_since_epoch()
+            .as_micros();
         self.duration = core::time::Duration::from_micros(microseconds);
     }
 
@@ -112,11 +116,10 @@ impl<'a> EspWifiUdpSocket<'a> {
     }
 }
 
-impl sntpc::async_impl::NtpUdpSocket for EspWifiUdpSocket<'_> {
-    async fn send_to<T: ToSocketAddrs + Send>(&self, buf: &[u8], addr: T) -> sntpc::Result<usize> {
-        let addrs = addr.to_socket_addrs().unwrap().next().unwrap();
-        let port = addrs.port();
-        let IpAddr::V4(addr) = addrs.ip() else {
+impl sntpc::NtpUdpSocket for EspWifiUdpSocket<'_> {
+    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> sntpc::Result<usize> {
+        let port = addr.port();
+        let IpAddr::V4(addr) = addr.ip() else {
             panic!("we do not support ipv6");
         };
         let [a, b, c, d] = addr.octets();
@@ -141,11 +144,8 @@ impl sntpc::async_impl::NtpUdpSocket for EspWifiUdpSocket<'_> {
             .recv_from(buf)
             .await
             .map(|(bytes, meta)| {
-                let IpAddress::Ipv4(smoltcp::wire::Ipv4Address([a, b, c, d])) = meta.endpoint.addr;
-                (
-                    bytes,
-                    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(a, b, c, d)), meta.endpoint.port),
-                )
+                let IpAddress::Ipv4(addr) = meta.endpoint.addr;
+                (bytes, SocketAddr::new(IpAddr::V4(addr), meta.endpoint.port))
             })
             .map_err(|e| {
                 defmt::error!("error during time recv: {}", e);
@@ -168,7 +168,7 @@ pub async fn get_time(socket: UdpSocket<'_>) -> Option<NtpResult> {
     let socket = EspWifiUdpSocket::new(socket);
 
     let context = NtpContext::new(StdTimestampGen::default());
-    sntpc::async_impl::get_time(server_socket_addr, socket, context)
+    sntpc::get_time(server_socket_addr, &socket, context)
         .await
         .inspect_err(|e| {
             defmt::error!(

@@ -1,10 +1,15 @@
+#![deny(clippy::large_futures)]
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 
-use defmt::write;
-use esp_hal::{peripherals::LPWR, reset::SleepSource};
+use defmt::{println, write};
+use esp_hal::{
+    peripherals::LPWR,
+    rtc_cntl::{reset_reason, wakeup_cause},
+    system::{Cpu, SleepSource},
+};
 
 mod battery;
 mod dns;
@@ -37,15 +42,13 @@ const RTCIO_GPIO35_CHANNEL: u32 = 1 << 5;
 fn get_ext1_wakeup_button(rtc_cntl: &LPWR) -> Result<Button, u32> {
     // TODO when esp32_hal lets you read the wakeup status, it'd be nice to use that
     // instead of using unsafe.
-    let wakeup_bits = rtc_cntl.ext_wakeup1_status().read().bits();
 
-    match wakeup_bits {
-        RTCIO_GPIO26_CHANNEL => Ok(Button::BottomLeft),
-        RTCIO_GPIO25_CHANNEL => Ok(Button::TopLeft),
-        RTCIO_GPIO35_CHANNEL => Ok(Button::TopRight),
-        RTCIO_GPIO4_CHANNEL => Ok(Button::BottomRight),
-        _ => Err(wakeup_bits),
-    }
+    let reason = reset_reason(Cpu::ProCpu);
+    let wake_reason = wakeup_cause();
+
+    // defmt::info!("reason {:?} {:?}", reason, wake_reason);
+
+    Ok(Button::TopRight)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -77,7 +80,7 @@ impl defmt::Format for WakeupCause {
 }
 
 pub fn get_wakeup_cause(rtc_cntl: &LPWR) -> WakeupCause {
-    let cause = esp_hal::reset::get_wakeup_cause();
+    let cause = wakeup_cause();
 
     match cause {
         SleepSource::Ext0 => WakeupCause::ExternalRtcAlarm,

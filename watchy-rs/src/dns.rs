@@ -1,4 +1,5 @@
-use embedded_nal_async::IpAddr;
+use core::net::IpAddr;
+
 use esp_println::println;
 
 /// A simple dns resolver that only supports IP addresses
@@ -11,13 +12,13 @@ impl embedded_nal_async::Dns for StaticDns {
         &self,
         _host: &str,
         _addr_type: embedded_nal_async::AddrType,
-    ) -> Result<embedded_nal_async::IpAddr, Self::Error> {
+    ) -> Result<IpAddr, Self::Error> {
         Ok(IpAddr::from(parse_ip4v(_host)))
     }
 
     async fn get_host_by_address(
         &self,
-        _addr: embedded_nal_async::IpAddr,
+        _addr: IpAddr,
         _result: &mut [u8],
     ) -> Result<usize, Self::Error> {
         println!("{:?}", _addr);

@@ -59,7 +59,9 @@ cargo run --release
 
 ## Testing
 
-This is in progress, based on `hil-test`.
+Testing comes in 2 flavours, the dependency tests (the `crates` folder)
+and 'hardware-in-loop' tests on the MCU. The regular tests work fine,
+the HIL tests are in progress, based on `hil-test`.
 
 See https://github.com/esp-rs/esp-hal/tree/main/hil-test
 

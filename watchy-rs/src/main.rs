@@ -1,3 +1,4 @@
+#![deny(clippy::large_futures)]
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
@@ -7,6 +8,8 @@
 extern crate alloc;
 
 use esp_backtrace as _;
+use esp_hal::i2c::master::{Config, I2c};
+use esp_hal::time::Rate;
 use esp_println as _;
 
 use async_debounce::Debouncer;
@@ -20,24 +23,23 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::{Duration, Timer};
 use embedded_hal::i2c::ErrorType;
 use embedded_hal_async::digital::Wait;
+use esp_hal::Blocking;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
-use esp_hal::gpio::{ErasedPin, GpioPin, Input, Io, Level, Output, Pull};
-use esp_hal::i2c::I2C;
-use esp_hal::interrupt::software::SoftwareInterruptControl;
+use esp_hal::gpio::{GpioPin, Input, InputConfig, Io, Level, Output, Pull};
 use esp_hal::interrupt::Priority;
+use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::peripherals::I2C0;
 use esp_hal::rtc_cntl::Rtc;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::timer::{ErasedTimer, OneShotTimer, PeriodicTimer};
-use esp_hal::{prelude::*, Blocking};
-use esp_hal_embassy::InterruptExecutor;
+use esp_hal::timer::{OneShotTimer, PeriodicTimer};
+use esp_hal_embassy::{InterruptExecutor, main};
 use static_cell::StaticCell;
 
 use watchy_rs::GlobalTime;
 
-static TIMERS: StaticCell<[OneShotTimer<ErasedTimer>; 1]> = StaticCell::new();
-static VIBRATION: StaticCell<Output<ErasedPin>> = StaticCell::new();
+static TIMERS: StaticCell<[OneShotTimer<Blocking>; 1]> = StaticCell::new();
+static VIBRATION: StaticCell<Output> = StaticCell::new();
 static RTC: StaticCell<Rtc> = StaticCell::new();
 
 /// Run the OS
@@ -46,14 +48,11 @@ static RTC: StaticCell<Rtc> = StaticCell::new();
 /// things like buttons.
 #[main]
 async fn main(low_prio_spawner: Spawner) {
-    let peripherals = {
-        let mut config = esp_hal::Config::default();
-        config.cpu_clock = CpuClock::Clock80MHz;
-        esp_hal::init(config)
-    };
+    let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz));
 
     // needed for wifi
-    esp_alloc::heap_allocator!(72 * 1024);
+    // 72 * 1024
+    esp_alloc::heap_allocator!(size: 73728);
 
     let cause = watchy_rs::get_wakeup_cause(&peripherals.LPWR);
     defmt::info!("starting due to {:?}", cause);
@@ -61,7 +60,6 @@ async fn main(low_prio_spawner: Spawner) {
     let rtc = RTC.init(Rtc::new(peripherals.LPWR));
 
     let delay = Delay::new();
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
     // let wakeup_pins = &mut [(&mut io.pins.gpio7.into_ref(), WakeupLevel::Low)];
     // let rtcio = RtcioWakeupSource::new(wakeup_pins);
@@ -71,8 +69,7 @@ async fn main(low_prio_spawner: Spawner) {
 
     let embassy_timers = {
         let timg0 = TimerGroup::new(peripherals.TIMG0);
-        let timer0: ErasedTimer = timg0.timer0.into();
-        let timers = [OneShotTimer::new(timer0)];
+        let timers = [OneShotTimer::new(timg0.timer0)];
         TIMERS.init(timers)
     };
 
@@ -86,15 +83,15 @@ async fn main(low_prio_spawner: Spawner) {
         let executor = InterruptExecutor::new(sw_ints.software_interrupt2);
         let executor = EXECUTOR.init(executor);
         let spawner = executor.start(Priority::Priority3);
-        let vibration_motor = Output::new(io.pins.gpio17, Level::Low);
+        let vibration_motor = Output::new(peripherals.GPIO17, Level::Low, Default::default());
         let vibration_motor = VIBRATION.init(vibration_motor);
         spawner.must_spawn(handle_buttons(
-            io.pins.gpio7,
-            io.pins.gpio6,
-            io.pins.gpio0,
-            io.pins.gpio8,
-            io.pins.gpio14,
-            io.pins.gpio13,
+            peripherals.GPIO7,
+            peripherals.GPIO6,
+            peripherals.GPIO0,
+            peripherals.GPIO8,
+            peripherals.GPIO14,
+            peripherals.GPIO13,
             vibration_motor,
         ));
     }
@@ -102,8 +99,7 @@ async fn main(low_prio_spawner: Spawner) {
     {
         let wifi_timer = {
             let timg1 = TimerGroup::new(peripherals.TIMG1);
-            let timer0: ErasedTimer = timg1.timer0.into();
-            PeriodicTimer::new(timer0)
+            timg1.timer0
         };
 
         low_prio_spawner.must_spawn(watchy_rs::wifi(
@@ -119,22 +115,29 @@ async fn main(low_prio_spawner: Spawner) {
 
     low_prio_spawner.must_spawn(watchy_rs::drive_display(
         peripherals.SPI2,
-        io.pins.gpio47,
-        io.pins.gpio46,
-        io.pins.gpio48,
-        io.pins.gpio33,
-        io.pins.gpio34,
-        io.pins.gpio35,
-        io.pins.gpio36,
+        peripherals.GPIO47,
+        peripherals.GPIO46,
+        peripherals.GPIO48,
+        peripherals.GPIO33,
+        peripherals.GPIO34,
+        peripherals.GPIO35,
+        peripherals.GPIO36,
         global_time,
-        io.pins.gpio9,
-        io.pins.gpio10,
+        peripherals.GPIO9,
+        peripherals.GPIO10,
         peripherals.ADC1,
-        peripherals.DMA,
+        peripherals.DMA_CH0,
     ));
 
     {
-        let i2c0 = I2C::new(peripherals.I2C0, io.pins.gpio12, io.pins.gpio11, 400.kHz());
+        let i2c0 = I2c::new(
+            peripherals.I2C0,
+            Config::default().with_frequency(Rate::from_khz(400)),
+        )
+        .unwrap()
+        .with_scl(peripherals.GPIO12)
+        .with_sda(peripherals.GPIO11);
+
         let accel = Bma423::new(
             i2c0,
             bma423::Config {
@@ -144,7 +147,7 @@ async fn main(low_prio_spawner: Spawner) {
                 sample_rate: bma423::AccelConfigOdr::Odr100,
             },
         );
-        low_prio_spawner.must_spawn(handle_accel(accel, delay));
+        // low_prio_spawner.must_spawn(handle_accel(accel, delay));
     }
 
     let time = watchy_rs::get_time().await;
@@ -161,10 +164,7 @@ async fn main(low_prio_spawner: Spawner) {
 }
 
 #[embassy_executor::task]
-async fn handle_accel(
-    accel: Bma423<I2C<'static, I2C0, Blocking>, Uninitialized>,
-    mut delay: Delay,
-) {
+async fn handle_accel(accel: Bma423<I2c<'static, Blocking>, Uninitialized>, mut delay: Delay) {
     let mut accel = accel.init(&mut delay).expect("failed to init accel");
     accel
         .set_power_control(PowerControlFlag::Auxiliary)
@@ -205,7 +205,7 @@ async fn handle_accel(
     }
 }
 
-fn print_accel_error(e: Error<<I2C<'static, I2C0, Blocking> as ErrorType>::Error>) {
+fn print_accel_error(e: Error<<I2c<'static, Blocking> as ErrorType>::Error>) {
     match e {
         Error::BadArgument => {
             defmt::info!("ACCEL: bad argument");
@@ -231,16 +231,19 @@ async fn handle_buttons(
     p4: GpioPin<8>,
     acc_int_1: GpioPin<14>,
     _acc_int_2: GpioPin<13>,
-    vibration: &'static mut Output<'static, ErasedPin>,
+    vibration: &'static mut Output<'static>,
 ) {
     let vibration_signal = embassy_sync::signal::Signal::<NoopRawMutex, _>::new();
 
     let debounce_time = embassy_time::Duration::from_millis(5);
-    let mut button_1 = Debouncer::new(Input::new(p1, Pull::None), debounce_time);
-    let mut button_2 = Debouncer::new(Input::new(p2, Pull::None), debounce_time);
-    let mut button_3 = Debouncer::new(Input::new(p3, Pull::None), debounce_time);
-    let mut button_4 = Debouncer::new(Input::new(p4, Pull::None), debounce_time);
-    let mut interrupt = Debouncer::new(Input::new(acc_int_1, Pull::Up), debounce_time);
+    let mut button_1 = Debouncer::new(Input::new(p1, InputConfig::default()), debounce_time);
+    let mut button_2 = Debouncer::new(Input::new(p2, InputConfig::default()), debounce_time);
+    let mut button_3 = Debouncer::new(Input::new(p3, InputConfig::default()), debounce_time);
+    let mut button_4 = Debouncer::new(Input::new(p4, InputConfig::default()), debounce_time);
+    let mut interrupt = Debouncer::new(
+        Input::new(acc_int_1, InputConfig::default().with_pull(Pull::Up)),
+        debounce_time,
+    );
 
     let drive_accel = async {
         loop {
